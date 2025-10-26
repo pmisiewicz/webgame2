@@ -93,7 +93,7 @@ async function createPlayer() {
     const { model, animations } = await loadModel("Steve.glb")
     playerModel = model // Zapisanie referencji
 
-    playerModel.scale.setScalar(1)
+    playerModel.scale.setScalar(0.75)
     playerModel.position.set(5, 7, 8)
 
     scene.add(playerModel)
@@ -179,7 +179,7 @@ function handlePlayerMovement() {
 function updateCameraPosition(instant: boolean = false) {
     if (!playerModel) return
 
-    const offset = new THREE.Vector3(0, 5, -10) // Przesunięcie kamery (x, y, z) względem gracza
+    const offset = new THREE.Vector3(0, 3, -7) // Przesunięcie kamery (x, y, z) względem gracza
     const targetPosition = new THREE.Vector3()
 
     // Ustawienie offsetu w lokalnym układzie współrzędnych gracza
@@ -191,7 +191,7 @@ function updateCameraPosition(instant: boolean = false) {
         camera.position.copy(targetPosition)
     } else {
         // Płynne podążanie kamery (interpolacja liniowa - lerp)
-        camera.position.lerp(targetPosition, 0.02)
+        camera.position.lerp(targetPosition, 0.05)
     }
 
     // Kamera zawsze patrzy na gracza (lub punkt nad nim)
