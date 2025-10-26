@@ -28,22 +28,24 @@ renderer.shadowMap.type = THREE.PCFShadowMap;
 document.body.appendChild(renderer.domElement);
 
 const hemiLight = new THREE.HemisphereLight(0xffffff, 0xdddddd, 1.2);
-hemiLight.position.set(0, 1000, 0);
+hemiLight.position.set(0, 100, 0);
 scene.add(hemiLight);
 
 const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
-dirLight.position.set(0, 50, 0);
+dirLight.position.set(50, 50, 50);
+dirLight.target.position.set(0, 0, 0);
 dirLight.castShadow = true;
-const shadowSize = 50;
+const shadowSize = 25;
 dirLight.shadow.camera.left = -shadowSize;
 dirLight.shadow.camera.right = shadowSize;
 dirLight.shadow.camera.top = shadowSize;
 dirLight.shadow.camera.bottom = -shadowSize;
 dirLight.shadow.camera.near = 1;
-dirLight.shadow.camera.far = 150;
-dirLight.shadow.mapSize.width = 2048;
-dirLight.shadow.mapSize.height = 2048;
+dirLight.shadow.camera.far = FOG_FAR;
+dirLight.shadow.mapSize.width = 1024;
+dirLight.shadow.mapSize.height = 1024;
 scene.add(dirLight);
+scene.add(dirLight.target);
 
 const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(1000, 1000),
@@ -170,6 +172,10 @@ async function createWorld() {
         model.traverse((child) => {
             if ((child as THREE.Mesh).isMesh) {
                 worldObjects.push(child as THREE.Mesh);
+                if (child.geometry.isBufferGeometry) {
+                    // Ensures the raycaster can return a 'face' and 'face.normal' - this fixes shadows!
+                    child.geometry.computeVertexNormals();
+                }
             }
         });
 
@@ -623,6 +629,23 @@ function animate() {
 
     handlePlayerMovement();
     updateCameraPosition();
+
+    const playerX = playerModel.position.x;
+    const playerZ = playerModel.position.z;
+
+    dirLight.target.position.set(playerX, 0, playerZ);
+
+    const offsetX = 50;
+    const offsetY = 50;
+    const offsetZ = 50;
+
+    dirLight.position.set(
+        playerX + offsetX,
+        offsetY, // Keep light at a fixed height
+        playerZ + offsetZ
+    );
+
+    dirLight.target.updateMatrixWorld();
 
     // --- Handle cloud movement ---
     clouds.forEach((cloud) => {
