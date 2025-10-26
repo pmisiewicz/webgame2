@@ -6,14 +6,14 @@ const skyColor = 0x87ceeb; // Define a variable for the sky color
 scene.background = new THREE.Color(skyColor);
 
 const FOG_NEAR = 50;
-const FOG_FAR = 100;
+const FOG_FAR = 500;
 scene.fog = new THREE.Fog(skyColor, FOG_NEAR, FOG_FAR);
 
 const camera = new THREE.PerspectiveCamera(
     60,
     window.innerWidth / window.innerHeight,
     0.5,
-    100,
+    FOG_FAR,
 );
 
 const listener = new THREE.AudioListener();
@@ -46,7 +46,7 @@ dirLight.shadow.mapSize.height = 2048;
 scene.add(dirLight);
 
 const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(5000, 5000),
+    new THREE.PlaneGeometry(1000, 1000),
     new THREE.MeshStandardMaterial({ color: 0x47a24c }),
 );
 ground.rotation.x = -Math.PI / 2;
@@ -215,12 +215,12 @@ function loadAudio() {
 
 async function createPlayer() {
     try {
-        const { model, animations } = await loadModel("Steve.glb");
+        const { model, animations } = await loadModel("Animated Platformer Character.glb");
         playerModel = model;
 
         loadAudio();
 
-        playerModel.scale.setScalar(0.75);
+        playerModel.scale.setScalar(0.5);
         playerModel.position.set(5, 7, 8);
 
         scene.add(playerModel);
@@ -231,12 +231,12 @@ async function createPlayer() {
             const runClip = animations.find(
                 (clip) =>
                     clip.name ===
-                    "CharacterArmature|CharacterArmature|CharacterArmature|Run",
+                    "CharacterArmature|Run",
             );
             const walkClip = animations.find(
                 (clip) =>
                     clip.name ===
-                    "CharacterArmature|CharacterArmature|CharacterArmature|Walk",
+                    "CharacterArmature|Walk",
             );
 
             if (runClip) {
