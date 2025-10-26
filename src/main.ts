@@ -12,12 +12,12 @@ renderer.shadowMap.enabled = true
 renderer.shadowMap.type = THREE.PCFSoftShadowMap
 document.body.appendChild(renderer.domElement)
 
-const hemiLight = new THREE.HemisphereLight(0xffffff, 0x33ff77, 1.8)
+const hemiLight = new THREE.HemisphereLight(0xffffff, 0x33ff77, 1.2)
 hemiLight.position.set(0, 1000, 0)
 scene.add(hemiLight)
 
-const dirLight = new THREE.DirectionalLight(0xffffff, 1.8)
-dirLight.position.set(50, 50, 50)
+const dirLight = new THREE.DirectionalLight(0xffffff, 1.2)
+dirLight.position.set(0, 50, 0)
 dirLight.castShadow = true
 const shadowSize = 50
 dirLight.shadow.camera.left = -shadowSize
