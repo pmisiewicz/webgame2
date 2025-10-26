@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
+import { MeshBVH, acceleratedRaycast } from "three-mesh-bvh";
 
 const scene = new THREE.Scene();
 const skyColor = 0x87ceeb; // Define a variable for the sky color
@@ -42,8 +43,8 @@ dirLight.shadow.camera.top = shadowSize;
 dirLight.shadow.camera.bottom = -shadowSize;
 dirLight.shadow.camera.near = 1;
 dirLight.shadow.camera.far = FOG_FAR;
-dirLight.shadow.mapSize.width = 1024;
-dirLight.shadow.mapSize.height = 1024;
+dirLight.shadow.mapSize.width = 2048;
+dirLight.shadow.mapSize.height = 2048;
 scene.add(dirLight);
 scene.add(dirLight.target);
 
@@ -62,7 +63,9 @@ let waterSound: THREE.PositionalAudio | null = null;
 let bumpSound: THREE.PositionalAudio | null = null;
 
 let playerModel: THREE.Group | null = null;
-let moveSpeed = 1.2;
+const RUN_SPEED = 0.5;
+const WALK_SPEED = 0.25;
+let moveSpeed = RUN_SPEED;
 const rotationSpeed = 0.015;
 const MAX_STEP_HEIGHT = 0.66;
 const BUMP_DISTANCE = 2;
@@ -115,8 +118,8 @@ function createSun() {
     // Main sun sphere - bright yellow/orange
     const sunGeometry = new THREE.SphereGeometry(8, 32, 32);
     const sunMaterial = new THREE.MeshBasicMaterial({
-        color: 0xFDB813, // Warm golden yellow
-        transparent: false
+        color: 0xfdb813, // Warm golden yellow
+        transparent: false,
     });
     const sun = new THREE.Mesh(sunGeometry, sunMaterial);
     sunGroup.add(sun);
@@ -124,9 +127,9 @@ function createSun() {
     // Inner glow layer
     const glowGeometry1 = new THREE.SphereGeometry(9.5, 32, 32);
     const glowMaterial1 = new THREE.MeshBasicMaterial({
-        color: 0xFFD700,
+        color: 0xffd700,
         transparent: true,
-        opacity: 0.3
+        opacity: 0.3,
     });
     const glow1 = new THREE.Mesh(glowGeometry1, glowMaterial1);
     sunGroup.add(glow1);
@@ -134,9 +137,9 @@ function createSun() {
     // Outer glow layer
     const glowGeometry2 = new THREE.SphereGeometry(11, 32, 32);
     const glowMaterial2 = new THREE.MeshBasicMaterial({
-        color: 0xFFE4B5,
+        color: 0xffe4b5,
         transparent: true,
-        opacity: 0.2
+        opacity: 0.2,
     });
     const glow2 = new THREE.Mesh(glowGeometry2, glowMaterial2);
     sunGroup.add(glow2);
@@ -144,9 +147,9 @@ function createSun() {
     // Outermost glow layer
     const glowGeometry3 = new THREE.SphereGeometry(13, 32, 32);
     const glowMaterial3 = new THREE.MeshBasicMaterial({
-        color: 0xFFFFE0,
+        color: 0xffffe0,
         transparent: true,
-        opacity: 0.1
+        opacity: 0.1,
     });
     const glow3 = new THREE.Mesh(glowGeometry3, glowMaterial3);
     sunGroup.add(glow3);
@@ -223,6 +226,8 @@ async function createWorld() {
                 if (child.geometry.isBufferGeometry) {
                     // Ensures the raycaster can return a 'face' and 'face.normal' - this fixes shadows!
                     child.geometry.computeVertexNormals();
+                    (child.geometry as any).boundsTree = new MeshBVH(child.geometry);
+                    child.raycast = acceleratedRaycast;
                 }
             }
         });
@@ -536,7 +541,7 @@ function handlePlayerMovement() {
         if (!controlsLocked) {
             if (isRunning) {
                 if (isWater) {
-                    moveSpeed = 0.5;
+                    moveSpeed = WALK_SPEED;
 
                     if (!walkAction.isRunning()) {
                         runAction.fadeOut(0.2);
@@ -550,7 +555,7 @@ function handlePlayerMovement() {
                         runningSound.stop();
                     }
                 } else {
-                    moveSpeed = 1.2;
+                    moveSpeed = RUN_SPEED;
 
                     if (!runAction.isRunning()) {
                         walkAction.fadeOut(0.2);
@@ -589,7 +594,7 @@ function handlePlayerMovement() {
         if (!controlsLocked) {
             if (isRunning) {
                 if (isWater) {
-                    moveSpeed = 0.5;
+                    moveSpeed = WALK_SPEED;
                     if (waterSound && !waterSound.isPlaying) {
                         waterSound.play();
                     }
@@ -597,7 +602,7 @@ function handlePlayerMovement() {
                         runningSound.stop();
                     }
                 } else {
-                    moveSpeed = 1.2;
+                    moveSpeed = RUN_SPEED;
                     if (runningSound && !runningSound.isPlaying) {
                         runningSound.play();
                     }
@@ -664,7 +669,7 @@ window.addEventListener("keyup", (event) => {
 });
 
 createWorld();
-createSun()
+createSun();
 createClouds();
 createPlayer();
 
@@ -679,35 +684,24 @@ function animate() {
     handlePlayerMovement();
     updateCameraPosition();
 
-    const playerX = playerModel.position.x;
-    const playerZ = playerModel.position.z;
+    if (playerModel) {
+        const playerX = playerModel.position.x;
+        const playerZ = playerModel.position.z;
 
-    dirLight.target.position.set(playerX, 0, playerZ);
+        dirLight.target.position.set(playerX, 0, playerZ);
 
-    const offsetX = 50;
-    const offsetY = 50;
-    const offsetZ = 50;
+        const offsetX = 50;
+        const offsetY = 50;
+        const offsetZ = 50;
 
-    dirLight.position.set(
-        playerX + offsetX,
-        offsetY, // Keep light at a fixed height
-        playerZ + offsetZ
-    );
+        dirLight.position.set(
+            playerX + offsetX,
+            offsetY, // Keep light at a fixed height
+            playerZ + offsetZ,
+        );
 
-    dirLight.target.updateMatrixWorld();
-
-    // --- Handle cloud movement ---
-    clouds.forEach((cloud) => {
-        // Move slowly along the X axis (to simulate wind)
-        cloud.position.x += 0.05 * delta;
-
-        // Wrap around to simulate endless clouds
-        if (cloud.position.x > 150) {
-            cloud.position.x = -150; // Wrap around to the other side
-            // Randomize Z position slightly to prevent repeating patterns
-            cloud.position.z = (Math.random() - 0.5) * 300;
-        }
-    });
+        dirLight.target.updateMatrixWorld();
+    }
 
     renderer.render(scene, camera);
 }
