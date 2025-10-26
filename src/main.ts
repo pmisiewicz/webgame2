@@ -6,7 +6,7 @@ const skyColor = 0x87ceeb; // Define a variable for the sky color
 scene.background = new THREE.Color(skyColor);
 
 const FOG_NEAR = 50;
-const FOG_FAR = 500;
+const FOG_FAR = 150;
 scene.fog = new THREE.Fog(skyColor, FOG_NEAR, FOG_FAR);
 
 const camera = new THREE.PerspectiveCamera(
@@ -24,7 +24,7 @@ const audioLoader = new THREE.AudioLoader();
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = THREE.PCFShadowMap;
 document.body.appendChild(renderer.domElement);
 
 const hemiLight = new THREE.HemisphereLight(0xffffff, 0xdddddd, 1.2);
@@ -346,7 +346,6 @@ function handlePlayerMovement() {
 
         playerModel.position.y = groundHeight + playerHeightOffset;
     } else {
-        // Jeśli nie ma terenu, ustaw na stałą wysokość minimalną lub zaimplementuj spadanie
         if (playerModel.position.y > 0) {
             playerModel.position.y -= 0.1; // Prosta grawitacja
         }
@@ -519,7 +518,6 @@ function animate() {
             cloud.position.z = (Math.random() - 0.5) * 300;
         }
     });
-    // ----------------------------------
 
     renderer.render(scene, camera);
 }
@@ -529,5 +527,6 @@ animate();
 window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+   	renderer.setSize(window.innerWidth, window.innerHeight);
 });
