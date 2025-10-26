@@ -57,12 +57,19 @@ const loader = new GLTFLoader();
 
 let runningSound: THREE.PositionalAudio | null = null;
 let waterSound: THREE.PositionalAudio | null = null;
+let bumpSound: THREE.PositionalAudio | null = null;
 
 let playerModel: THREE.Group | null = null;
 let moveSpeed = 1.2;
 const rotationSpeed = 0.015;
 const MAX_STEP_HEIGHT = 0.66;
+const BUMP_DISTANCE = 2;
 const keys: { [key: string]: boolean } = {};
+let controlsLocked: boolean = false;
+
+const tempMoveVector = new THREE.Vector3();
+const tempNextPosition = new THREE.Vector3();
+const tempBumpVector = new THREE.Vector3(); // Used for bump calculation
 
 const raycaster = new THREE.Raycaster();
 const down = new THREE.Vector3(0, -1, 0);
@@ -74,6 +81,7 @@ const clouds: THREE.Group[] = [];
 let mixer: THREE.AnimationMixer | null = null;
 let runAction: THREE.AnimationAction | null = null;
 let walkAction: THREE.AnimationAction | null = null;
+let fallAction: THREE.AnimationAction | null = null;
 const clock = new THREE.Clock();
 
 async function loadModel(
@@ -131,7 +139,7 @@ function createCloud(): THREE.Group {
 function createClouds() {
     const cloudCount = 100;
     const areaSize = 500; // Define the horizontal area for clouds
-    const altitude = 25;  // Define the base altitude for clouds
+    const altitude = 25; // Define the base altitude for clouds
 
     for (let i = 0; i < cloudCount; i++) {
         // Randomize horizontal position within the area
@@ -210,7 +218,25 @@ function loadAudio() {
             console.error("Błąd ładowania dźwięku wody:", err);
         },
     );
-    playerModel.add(waterSound); // Attach water sound to player
+    playerModel.add(waterSound);
+
+    bumpSound = new THREE.PositionalAudio(listener);
+    audioLoader.load(
+        "/public/manbonk-357114.mp3",
+        function (buffer) {
+            if (bumpSound) {
+                bumpSound.setBuffer(buffer);
+                bumpSound.setLoop(false);
+                bumpSound.setVolume(1.0);
+                bumpSound.setRefDistance(5);
+            }
+        },
+        undefined,
+        (err) => {
+            console.error("Błąd ładowania dźwięku uderzenia:", err);
+        },
+    );
+    playerModel.add(bumpSound);
 }
 
 async function createPlayer() {
@@ -229,14 +255,13 @@ async function createPlayer() {
             mixer = new THREE.AnimationMixer(playerModel);
 
             const runClip = animations.find(
-                (clip) =>
-                    clip.name ===
-                    "CharacterArmature|Run",
+                (clip) => clip.name === "CharacterArmature|Run",
             );
             const walkClip = animations.find(
-                (clip) =>
-                    clip.name ===
-                    "CharacterArmature|Walk",
+                (clip) => clip.name === "CharacterArmature|Walk",
+            );
+            const fallClip = animations.find(
+                (clip) => clip.name === "CharacterArmature|Death",
             );
 
             if (runClip) {
@@ -258,6 +283,26 @@ async function createPlayer() {
                     animations.map((c) => c.name),
                 );
             }
+
+            if (fallClip) {
+                fallAction = mixer.clipAction(fallClip);
+                fallAction.setLoop(THREE.LoopOnce, 1);
+                fallAction.clampWhenFinished = true;
+            } else {
+                console.warn(
+                    "Nie znaleziono klipu animacji 'death'. Dostępne klipy:",
+                    animations.map((c) => c.name),
+                );
+            }
+
+            if (mixer) {
+                mixer.addEventListener("finished", (e) => {
+                    if (e.action === fallAction) {
+                        // Once the fall action is done, make it instantly stop holding the pose
+                        fallAction.stop();
+                    }
+                });
+            }
         } else {
             console.warn("Model Steve.glb nie zawiera animacji.");
         }
@@ -270,6 +315,17 @@ async function createPlayer() {
 
 function handlePlayerMovement() {
     if (!playerModel) return;
+
+    if (controlsLocked) {
+        // Still allow rotation, but block movement vectors
+        if (keys["a"] || keys["A"] || keys["ArrowLeft"]) {
+            playerModel.rotation.y += rotationSpeed;
+        }
+        if (keys["d"] || keys["D"] || keys["ArrowRight"]) {
+            playerModel.rotation.y -= rotationSpeed;
+        }
+        return;
+    }
 
     const originalPosition = playerModel.position.clone();
     let moving = false;
@@ -315,23 +371,62 @@ function handlePlayerMovement() {
             nextGroundHeight = nextOrigin.y - nextIntersects[0].distance;
         }
 
-        // Sprawdź, czy różnica wysokości jest zbyt duża
         const heightDifference = nextGroundHeight - currentGroundHeight;
 
         if (heightDifference > MAX_STEP_HEIGHT) {
-            // Zatrzymanie ruchu: potencjalna pozycja Z i X jest ignorowana
-            // targetPosition pozostaje taka sama jak originalPosition (oprócz Y)
-            targetPosition.x = originalPosition.x;
-            targetPosition.z = originalPosition.z;
-            moving = false; // Zatrzymanie animacji biegu
+            // 1. Calculate the failed movement vector (target - original)
+            const failedMovementVector = targetPosition
+                .clone()
+                .sub(originalPosition);
+
+            // 2. Calculate the bump vector (reversed, normalized, and scaled)
+            tempBumpVector
+                .copy(failedMovementVector)
+                .negate()
+                .normalize()
+                .multiplyScalar(BUMP_DISTANCE); // Use the defined BUMP_DISTANCE
+
+            // 3. Update targetPosition to be the original position PLUS the bump.
+            // This is the final X/Z position for this frame.
+            targetPosition.x = originalPosition.x + tempBumpVector.x;
+            targetPosition.z = originalPosition.z + tempBumpVector.z;
+
+            // 4. Set movement flags
+            moving = false; // Stop animation and cancel the main move
+
+            // 5. New: Stop current movement animations and play fall/death action
+            if (runAction) runAction.stop();
+            if (walkAction) walkAction.stop();
+
+            if (fallAction) {
+                fallAction.reset().play();
+
+                // 6. New: Lock controls for 3 seconds
+                controlsLocked = true;
+                setTimeout(() => {
+                    controlsLocked = false;
+                }, 1000); // 3000 milliseconds = 3 seconds
+
+                // 7. New: Play bump sound
+                if (bumpSound && !bumpSound.isPlaying) {
+                    bumpSound.play();
+                }
+
+                // Stop continuous sounds if they are playing during the bump
+                if (runningSound && runningSound.isPlaying) runningSound.stop();
+                if (waterSound && waterSound.isPlaying) waterSound.stop();
+            }
         }
     }
 
     // 2. Faktyczne przesunięcie po weryfikacji
+    // This now correctly sets the position:
+    // - If successful: targetPosition has the new coordinates.
+    // - If blocked: targetPosition has the original coordinates + bump.
     playerModel.position.x = targetPosition.x;
     playerModel.position.z = targetPosition.z;
 
-    // 3. Raycasting w dół, aby ustawić wysokość Y w NOWEJ pozycji (targetPosition/originalPosition)
+    // 3. Raycasting w dół, aby ustawić wysokość Y w NOWEJ pozycji (targetPosition/originalPosition + bump)
     const finalOrigin = playerModel.position.clone();
     finalOrigin.y += 20;
 
@@ -372,7 +467,8 @@ function handlePlayerMovement() {
             console.log("" + materialColor.getHex().toString(16));
 
             if (
-                materialColor.getHex() === 0x00bfd4 || materialColor.getHex() === 0x81dfeb
+                materialColor.getHex() === 0x00bfd4 ||
+                materialColor.getHex() === 0x81dfeb
             ) {
                 isWater = true;
             }
@@ -382,76 +478,86 @@ function handlePlayerMovement() {
     let isRunning = moving;
 
     if (runAction && walkAction) {
-        if (isRunning) {
-            if (isWater) {
-                moveSpeed = 0.5;
+        // Animation and sound logic only runs if controls are NOT locked
+        if (!controlsLocked) {
+            if (isRunning) {
+                if (isWater) {
+                    moveSpeed = 0.5;
 
-                if (!walkAction.isRunning()) {
-                    runAction.fadeOut(0.2);
-                    walkAction.reset().fadeIn(0.2).play();
-                }
+                    if (!walkAction.isRunning()) {
+                        runAction.fadeOut(0.2);
+                        walkAction.reset().fadeIn(0.2).play();
+                    }
 
-                if (waterSound && !waterSound.isPlaying) {
-                    waterSound.play();
-                }
-                if (runningSound && runningSound.isPlaying) {
-                    runningSound.stop();
+                    if (waterSound && !waterSound.isPlaying) {
+                        waterSound.play();
+                    }
+                    if (runningSound && runningSound.isPlaying) {
+                        runningSound.stop();
+                    }
+                } else {
+                    moveSpeed = 1.2;
+
+                    if (!runAction.isRunning()) {
+                        walkAction.fadeOut(0.2);
+                        runAction.reset().fadeIn(0.2).play();
+                    }
+
+                    if (runningSound && !runningSound.isPlaying) {
+                        runningSound.play();
+                    }
+                    if (waterSound && waterSound.isPlaying) {
+                        waterSound.stop();
+                    }
                 }
             } else {
-                moveSpeed = 1.2;
-
-                if (!runAction.isRunning()) {
-                    walkAction.fadeOut(0.2);
-                    runAction.reset().fadeIn(0.2).play();
+                if (runAction.isRunning()) {
+                    runAction.stop();
+                }
+                if (walkAction.isRunning()) {
+                    walkAction.stop();
                 }
 
-                if (runningSound && !runningSound.isPlaying) {
-                    runningSound.play();
+                if (runningSound && runningSound.isPlaying) {
+                    runningSound.stop();
                 }
                 if (waterSound && waterSound.isPlaying) {
                     waterSound.stop();
                 }
             }
         } else {
-            if (runAction.isRunning()) {
-                runAction.stop();
-            }
-            if (walkAction.isRunning()) {
-                walkAction.stop();
-            }
-
-            if (runningSound && runningSound.isPlaying) {
-                runningSound.stop();
-            }
-            if (waterSound && waterSound.isPlaying) {
-                waterSound.stop();
-            }
+            // If controls are locked, ensure movement animations are stopped
+            if (runAction && runAction.isRunning()) runAction.stop();
+            if (walkAction && walkAction.isRunning()) walkAction.stop();
         }
     } else {
-        if (isRunning) {
-            if (isWater) {
-                moveSpeed = 0.5;
-                if (waterSound && !waterSound.isPlaying) {
-                    waterSound.play();
-                }
-                if (runningSound && runningSound.isPlaying) {
-                    runningSound.stop();
+        // Fallback for sound control if actions are missing, also respecting control lock
+        if (!controlsLocked) {
+            if (isRunning) {
+                if (isWater) {
+                    moveSpeed = 0.5;
+                    if (waterSound && !waterSound.isPlaying) {
+                        waterSound.play();
+                    }
+                    if (runningSound && runningSound.isPlaying) {
+                        runningSound.stop();
+                    }
+                } else {
+                    moveSpeed = 1.2;
+                    if (runningSound && !runningSound.isPlaying) {
+                        runningSound.play();
+                    }
+                    if (waterSound && waterSound.isPlaying) {
+                        waterSound.stop();
+                    }
                 }
             } else {
-                moveSpeed = 1.2;
-                if (runningSound && !runningSound.isPlaying) {
-                    runningSound.play();
+                if (runningSound && runningSound.isPlaying) {
+                    runningSound.stop();
                 }
                 if (waterSound && waterSound.isPlaying) {
                     waterSound.stop();
                 }
-            }
-        } else {
-            if (runningSound && runningSound.isPlaying) {
-                runningSound.stop();
-            }
-            if (waterSound && waterSound.isPlaying) {
-                waterSound.stop();
             }
         }
     }
@@ -484,6 +590,18 @@ function updateCameraPosition(instant: boolean = false) {
 }
 
 window.addEventListener("keydown", (event) => {
+    // 8. New: Ignore movement keys if controls are locked, but allow rotation
+    if (
+        controlsLocked &&
+        (event.key === "w" ||
+            event.key === "W" ||
+            event.key === "ArrowUp" ||
+            event.key === "s" ||
+            event.key === "S" ||
+            event.key === "ArrowDown")
+    ) {
+        return;
+    }
     keys[event.key] = true;
 });
 
@@ -528,5 +646,5 @@ window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-   	renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setSize(window.innerWidth, window.innerHeight);
 });
