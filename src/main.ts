@@ -46,9 +46,10 @@ scene.add(ground)
 const loader = new GLTFLoader()
 
 let runningSound: THREE.PositionalAudio | null = null
+let waterSound: THREE.PositionalAudio | null = null
 
 let playerModel: THREE.Group | null = null
-const moveSpeed = 1.2
+let moveSpeed = 1.2
 const rotationSpeed = 0.015
 const MAX_STEP_HEIGHT = 0.66
 const keys: { [key: string]: boolean } = {}
@@ -60,6 +61,7 @@ const worldObjects: THREE.Mesh[] = []
 
 let mixer: THREE.AnimationMixer | null = null
 let runAction: THREE.AnimationAction | null = null
+let walkAction: THREE.AnimationAction | null = null
 const clock = new THREE.Clock()
 
 async function loadModel(name: string): Promise<{ model: THREE.Group, animations: THREE.AnimationClip[] }> {
@@ -104,24 +106,33 @@ async function createWorld() {
 function loadAudio() {
     if (!playerModel) return
 
+    // Setup for Running Sound (Grass)
     runningSound = new THREE.PositionalAudio(listener)
-
-    // Load the audio file
     audioLoader.load('/public/running-on-the-floor-359909.mp3', function(buffer) {
         if (runningSound) {
             runningSound.setBuffer(buffer)
-            runningSound.setLoop(true) // Loop the sound for continuous running
-            runningSound.setVolume(0.5) // Adjust volume as needed (0.0 to 1.0)
-            runningSound.setRefDistance(10) // Sound volume drops off after this distance
+            runningSound.setLoop(true)
+            runningSound.setVolume(0.5)
+            runningSound.setRefDistance(10)
         }
-    },
-    undefined,
-    (err) => {
-        console.error('Błąd ładowania dźwięku:', err)
+    }, undefined, (err) => {
+        console.error('Błąd ładowania dźwięku trawy:', err)
     })
-
-    // Attach the audio source to the player model
     playerModel.add(runningSound)
+
+    // Setup for Water Sound
+    waterSound = new THREE.PositionalAudio(listener)
+    audioLoader.load('/public/walking-in-water-199418.mp3', function(buffer) {
+        if (waterSound) {
+            waterSound.setBuffer(buffer)
+            waterSound.setLoop(true)
+            waterSound.setVolume(0.5) // Set volume
+            waterSound.setRefDistance(10)
+        }
+    }, undefined, (err) => {
+        console.error('Błąd ładowania dźwięku wody:', err)
+    })
+    playerModel.add(waterSound) // Attach water sound to player
 }
 
 async function createPlayer() {
@@ -140,12 +151,20 @@ async function createPlayer() {
         mixer = new THREE.AnimationMixer(playerModel)
 
         const runClip = animations.find(clip => clip.name === 'CharacterArmature|CharacterArmature|CharacterArmature|Run')
+        const walkClip = animations.find(clip => clip.name === 'CharacterArmature|CharacterArmature|CharacterArmature|Walk')
 
         if (runClip) {
             runAction = mixer.clipAction(runClip)
             runAction.setLoop(THREE.LoopRepeat, Infinity)
         } else {
             console.warn("Nie znaleziono klipu animacji 'run'. Dostępne klipy:", animations.map(c => c.name))
+        }
+
+        if (walkClip) {
+            walkAction = mixer.clipAction(walkClip)
+            walkAction.setLoop(THREE.LoopRepeat, Infinity)
+        } else {
+            console.warn("Nie znaleziono klipu animacji 'walk'. Dostępne klipy:", animations.map(c => c.name))
         }
     } else {
         console.warn("Model Steve.glb nie zawiera animacji.")
@@ -244,21 +263,88 @@ function handlePlayerMovement() {
     playerModel.rotation.y -= rotationSpeed
   }
 
-  if (runAction) {
-     if (moving) {
-         if (!runAction.isRunning()) {
-             runAction.play()
-         }
-         if (runningSound && !runningSound.isPlaying) {
-             runningSound.play()
-         }
-     } else {
-         runAction.stop()
-         if (runningSound && runningSound.isPlaying) {
-             runningSound.stop()
-         }
-     }
-   }
+  let isWater = false
+
+    if (intersects.length > 0) {
+        const hitObject = intersects[0].object as THREE.Mesh
+
+        // Check the color of the hit material
+        if (hitObject.material && 'color' in hitObject.material) {
+            const materialColor = (hitObject.material as THREE.MeshStandardMaterial).color
+
+            console.log("" + materialColor.getHex().toString(16))
+
+            if (materialColor.getHex() === 0x00bfd4 || materialColor.getHex() === 0x81dfeb) {
+                isWater = true
+            }
+        }
+    }
+
+  let isRunning = moving
+
+    if (runAction && walkAction) {
+        if (isRunning) {
+            if (isWater) {
+                moveSpeed = 0.5;
+
+                if (!walkAction.isRunning()) {
+                    runAction.fadeOut(0.2)
+                    walkAction.reset().fadeIn(0.2).play()
+                }
+
+                if (waterSound && !waterSound.isPlaying) {
+                    waterSound.play()
+                }
+                if (runningSound && runningSound.isPlaying) {
+                    runningSound.stop()
+                }
+
+            } else {
+                moveSpeed = 1.2;
+
+                if (!runAction.isRunning()) {
+                    walkAction.fadeOut(0.2)
+                    runAction.reset().fadeIn(0.2).play()
+                }
+
+                if (runningSound && !runningSound.isPlaying) {
+                    runningSound.play()
+                }
+                if (waterSound && waterSound.isPlaying) {
+                    waterSound.stop()
+                }
+            }
+        } else {
+            if (runAction.isRunning()) {
+                runAction.stop();
+            }
+            if (walkAction.isRunning()) {
+                walkAction.stop();
+            }
+
+            if (runningSound && runningSound.isPlaying) {
+              runningSound.stop()
+            }
+            if (waterSound && waterSound.isPlaying) {
+              waterSound.stop()
+            }
+        }
+    } else {
+        if (isRunning) {
+            if (isWater) {
+                moveSpeed = 0.5;
+                if (waterSound && !waterSound.isPlaying) { waterSound.play() }
+                if (runningSound && runningSound.isPlaying) { runningSound.stop() }
+            } else {
+                moveSpeed = 1.2;
+                if (runningSound && !runningSound.isPlaying) { runningSound.play() }
+                if (waterSound && waterSound.isPlaying) { waterSound.stop() }
+            }
+        } else {
+            if (runningSound && runningSound.isPlaying) { runningSound.stop() }
+            if (waterSound && waterSound.isPlaying) { waterSound.stop() }
+        }
+    }
 }
 
 // Funkcja do aktualizacji pozycji kamery (widok TPP)
