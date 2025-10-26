@@ -76,8 +76,7 @@ const BUMP_DISTANCE = 2;
 const keys: { [key: string]: boolean } = {};
 let controlsLocked: boolean = false;
 
-// The following unused variables were removed: tempMoveVector and tempNextPosition
-const tempBumpVector = new THREE.Vector3(); // Used for bump calculation
+const tempBumpVector = new THREE.Vector3();
 
 const raycaster = new THREE.Raycaster();
 const down = new THREE.Vector3(0, -1, 0);
@@ -92,15 +91,22 @@ let walkAction: THREE.AnimationAction | null = null;
 let fallAction: THREE.AnimationAction | null = null;
 const clock = new THREE.Clock();
 
+// --- FPS Counter Variables ---
+let fpsElement: HTMLElement | null = null;
+let frameCount = 0;
+let lastTime = performance.now();
+const fpsInterval = 1000; // Update every second (1000ms)
+// -----------------------------
+
 async function loadModel(
     name: string,
 ): Promise<{ model: THREE.Group; animations: THREE.AnimationClip[] }> {
     return new Promise((resolve, reject) => {
         loader.load(
             `/models/${name}`,
-            (gltf: GLTF) => { // Type 'gltf' as GLTF
+            (gltf: GLTF) => {
                 const model = gltf.scene;
-                model.traverse((child: THREE.Object3D) => { // Type 'child' as THREE.Object3D
+                model.traverse((child: THREE.Object3D) => {
                     if ((child as THREE.Mesh).isMesh) {
                         const mesh = child as THREE.Mesh;
                         mesh.castShadow = true;
@@ -110,7 +116,7 @@ async function loadModel(
                 resolve({ model, animations: gltf.animations });
             },
             undefined,
-            (err: unknown) => reject(err), // FIX: Changed type from ErrorEvent to unknown
+            (err: unknown) => reject(err),
         );
     });
 }
@@ -217,7 +223,6 @@ function createClouds() {
     }
 }
 
-// FIX: Improved type guard to correctly check for Mesh properties
 function isMesh(child: THREE.Object3D): child is THREE.Mesh {
     return (child as THREE.Mesh).isMesh === true && 'geometry' in child;
 }
@@ -686,13 +691,54 @@ window.addEventListener("keyup", (event) => {
     keys[event.key] = false;
 });
 
+// Function to setup the FPS counter HTML element and styles
+function setupFpsCounter() {
+    // Inject styling for the counter
+    const style = document.createElement('style');
+    style.textContent = `
+        #fps-counter {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            color: #00ff00;
+            padding: 5px 10px;
+            font-family: monospace;
+            font-size: 14px;
+            z-index: 1000;
+            border-radius: 4px;
+        }
+    `;
+    document.head.appendChild(style);
+
+    // Create the element
+    fpsElement = document.createElement('div');
+    fpsElement.id = 'fps-counter';
+    fpsElement.textContent = 'FPS: --';
+    document.body.appendChild(fpsElement);
+}
+
 createWorld();
 createSun();
 createClouds();
 createPlayer();
+setupFpsCounter();
 
 function animate() {
     requestAnimationFrame(animate);
+
+    const now = performance.now();
+    frameCount++;
+
+    // Update FPS display every second
+    if (now > lastTime + fpsInterval) {
+        const fps = Math.round((frameCount * 1000) / (now - lastTime));
+        if (fpsElement) {
+            fpsElement.textContent = `FPS: ${fps}`;
+        }
+        lastTime = now;
+        frameCount = 0;
+    }
 
     const delta = clock.getDelta();
     if (mixer) {
