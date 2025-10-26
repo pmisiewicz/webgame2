@@ -109,6 +109,54 @@ async function loadModel(
     });
 }
 
+function createSun() {
+    const sunGroup = new THREE.Group();
+
+    // Main sun sphere - bright yellow/orange
+    const sunGeometry = new THREE.SphereGeometry(8, 32, 32);
+    const sunMaterial = new THREE.MeshBasicMaterial({
+        color: 0xFDB813, // Warm golden yellow
+        transparent: false
+    });
+    const sun = new THREE.Mesh(sunGeometry, sunMaterial);
+    sunGroup.add(sun);
+
+    // Inner glow layer
+    const glowGeometry1 = new THREE.SphereGeometry(9.5, 32, 32);
+    const glowMaterial1 = new THREE.MeshBasicMaterial({
+        color: 0xFFD700,
+        transparent: true,
+        opacity: 0.3
+    });
+    const glow1 = new THREE.Mesh(glowGeometry1, glowMaterial1);
+    sunGroup.add(glow1);
+
+    // Outer glow layer
+    const glowGeometry2 = new THREE.SphereGeometry(11, 32, 32);
+    const glowMaterial2 = new THREE.MeshBasicMaterial({
+        color: 0xFFE4B5,
+        transparent: true,
+        opacity: 0.2
+    });
+    const glow2 = new THREE.Mesh(glowGeometry2, glowMaterial2);
+    sunGroup.add(glow2);
+
+    // Outermost glow layer
+    const glowGeometry3 = new THREE.SphereGeometry(13, 32, 32);
+    const glowMaterial3 = new THREE.MeshBasicMaterial({
+        color: 0xFFFFE0,
+        transparent: true,
+        opacity: 0.1
+    });
+    const glow3 = new THREE.Mesh(glowGeometry3, glowMaterial3);
+    sunGroup.add(glow3);
+
+    // Position the sun in the sky
+    sunGroup.position.set(50, 40, 100);
+
+    scene.add(sunGroup);
+}
+
 function createCloud(): THREE.Group {
     const cloud = new THREE.Group();
     const cloudMaterial = new THREE.MeshLambertMaterial({
@@ -616,6 +664,7 @@ window.addEventListener("keyup", (event) => {
 });
 
 createWorld();
+createSun()
 createClouds();
 createPlayer();
 
