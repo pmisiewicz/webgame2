@@ -75,6 +75,7 @@ let moveSpeed = RUN_SPEED;
 const rotationSpeed = 0.035;
 const MAX_STEP_HEIGHT = 0.66;
 const BUMP_DISTANCE = 2;
+const WATER_SINK_DEPTH = -0.4;
 const keys: { [key: string]: boolean } = {};
 let controlsLocked: boolean = false;
 
@@ -95,12 +96,31 @@ const clock = new THREE.Clock();
 
 const FPS_LIMIT = 60;
 const interval = 1000 / FPS_LIMIT;
-let then = performance.now();
+let then = performance.now(); // Last time the frame was rendered
 
 let fpsElement: HTMLElement | null = null;
 let frameCount = 0;
 let lastTime = performance.now();
-const fpsInterval = 1000;
+const fpsInterval = 1000; // Update display every second (1000ms)
+
+const SPLASH_PARTICLE_COUNT = 16;
+const SPLASH_LIFESPAN = 1; // seconds
+const SPLASH_COLOR = 0x6FBFC9; // Water color (matches light water surface color)
+const SPLASH_EMISSION_RATE = 0.15; // Time in seconds between splash bursts
+let lastSplashTime = 0;
+
+const GRAVITY = -9.8 * 0.5; // Reduced gravity for effect
+
+interface SplashParticle {
+    mesh: THREE.Mesh;
+    velocity: THREE.Vector3;
+    age: number;
+    maxAge: number;
+}
+const particleData: SplashParticle[] = [];
+// Reusing a single geometry/material for all particles for efficiency
+const particleGeometry = new THREE.SphereGeometry(0.05, 4, 4);
+const particleMaterial = new THREE.MeshBasicMaterial({ color: SPLASH_COLOR, transparent: true, opacity: 1, depthWrite: false });
 
 async function loadModel(
     name: string,
@@ -400,6 +420,74 @@ async function createPlayer() {
     }
 }
 
+/**
+ * Creates and launches a burst of splash particles from the given position.
+ * @param position The world position (usually the player's feet) to spawn the splash.
+ */
+function spawnSplash(position: THREE.Vector3) {
+    for (let i = 0; i < SPLASH_PARTICLE_COUNT; i++) {
+        // Must clone material for unique opacity handling
+        const material = particleMaterial.clone();
+        const mesh = new THREE.Mesh(particleGeometry, material);
+
+        // 1. Initial Position: player position + small random spread
+        const initialPosition = position.clone();
+        initialPosition.y += 0.2; // Start just above water line
+        initialPosition.x += (Math.random() - 0.5) * 0.5;
+        initialPosition.z += (Math.random() - 0.5) * 0.5;
+        mesh.position.copy(initialPosition);
+
+        // 2. Initial Velocity
+        // Random horizontal velocity (up to 0.5 units/sec)
+        const velX = (Math.random() * 2 - 1) * 0.5;
+        // Upward initial velocity (1 to 2.5 units/sec)
+        const velY = Math.random() * 1.5 + 1;
+        const velZ = (Math.random() * 2 - 1) * 0.5;
+        const velocity = new THREE.Vector3(velX, velY, velZ);
+
+        scene.add(mesh);
+
+        particleData.push({
+            mesh,
+            velocity,
+            age: 0,
+            maxAge: SPLASH_LIFESPAN,
+        });
+    }
+}
+
+/**
+ * Updates the position, scale, and opacity of all active splash particles.
+ * @param delta Time elapsed since last frame.
+ */
+function updateSplashes(delta: number) {
+    for (let i = particleData.length - 1; i >= 0; i--) {
+        const particle = particleData[i];
+
+        particle.age += delta;
+
+        if (particle.age > particle.maxAge) {
+            scene.remove(particle.mesh);
+            // In a real application, we would dispose of geometry/material here for memory
+            particleData.splice(i, 1);
+            continue;
+        }
+
+        // Apply physics (gravity and update position)
+        particle.velocity.y += GRAVITY * delta;
+        particle.mesh.position.addScaledVector(particle.velocity, delta);
+
+        // Fade out and scale down based on life remaining
+        const lifeRatio = 1 - (particle.age / particle.maxAge);
+
+        (particle.mesh.material as THREE.MeshBasicMaterial).opacity = lifeRatio;
+
+        const scale = lifeRatio * 0.9 + 0.3;
+        particle.mesh.scale.setScalar(scale);
+    }
+}
+
+
 function handlePlayerMovement() {
     if (!playerModel) return;
 
@@ -440,20 +528,20 @@ function handlePlayerMovement() {
             true,
         );
 
-        let currentGroundHeight = originalPosition.y - 1; // Domyślna minimalna wysokość, jeśli raycast zawiedzie
+        let currentGroundHeight = originalPosition.y - 1; // Default min height if raycast fails
         if (currentIntersects.length > 0) {
             currentGroundHeight =
                 currentOrigin.y - currentIntersects[0].distance;
         }
 
-        // Sprawdź potencjalną pozycję (X i Z z targetPosition, ale Y wysoko)
+        // Check potential position (X and Z from targetPosition, but Y high)
         const nextOrigin = targetPosition.clone();
-        nextOrigin.y = originalPosition.y + 20; // Ustaw wysoko dla raycasta
+        nextOrigin.y = originalPosition.y + 20; // Set high for raycast
 
         raycaster.set(nextOrigin, down);
         const nextIntersects = raycaster.intersectObjects(worldObjects, true);
 
-        let nextGroundHeight = currentGroundHeight; // Jeśli brak terenu, przyjmij obecną wysokość
+        let nextGroundHeight = currentGroundHeight; // If no terrain, assume current height
         if (nextIntersects.length > 0) {
             nextGroundHeight = nextOrigin.y - nextIntersects[0].distance;
         }
@@ -471,7 +559,7 @@ function handlePlayerMovement() {
                 .copy(failedMovementVector)
                 .negate()
                 .normalize()
-                .multiplyScalar(BUMP_DISTANCE);
+                .multiplyScalar(BUMP_DISTANCE); // Use the defined BUMP_DISTANCE
 
             // 3. Update targetPosition to be the original position PLUS the bump.
             // This is the final X/Z position for this frame.
@@ -488,11 +576,11 @@ function handlePlayerMovement() {
             if (fallAction) {
                 fallAction.reset().play();
 
-                // 6. New: Lock controls
+                // 6. New: Lock controls for 3 seconds
                 controlsLocked = true;
                 setTimeout(() => {
                     controlsLocked = false;
-                }, 1000);
+                }, 1000); // 3000 milliseconds = 3 seconds
 
                 // 7. New: Play bump sound
                 if (bumpSound && !bumpSound.isPlaying) {
@@ -506,14 +594,11 @@ function handlePlayerMovement() {
         }
     }
 
-    // 2. Faktyczne przesunięcie po weryfikacji
-    // This now correctly sets the position:
-    // - If successful: targetPosition has the new coordinates.
-    // - If blocked: targetPosition has the original coordinates + bump.
+    // 2. Actual movement after verification
     playerModel.position.x = targetPosition.x;
     playerModel.position.z = targetPosition.z;
 
-    // 3. Raycasting w dół, aby ustawić wysokość Y w NOWEJ pozycji (targetPosition/originalPosition + bump)
+    // 3. Raycasting down to set the Y height in the NEW position
     const finalOrigin = playerModel.position.clone();
     finalOrigin.y += 20;
 
@@ -521,15 +606,35 @@ function handlePlayerMovement() {
 
     const intersects = raycaster.intersectObjects(worldObjects, true);
 
+    let isWater = false; // Initialize/reset water state for the current frame
+
     if (intersects.length > 0) {
         const distanceToGround = intersects[0].distance;
         const groundHeight = finalOrigin.y - distanceToGround;
-        const playerHeightOffset = 0;
+
+        // Check the material of the ground the player is currently on
+        const hitObject = intersects[0].object as THREE.Mesh;
+        if (hitObject.material && "color" in hitObject.material) {
+            const materialColor = (
+                hitObject.material as THREE.MeshStandardMaterial
+            ).color;
+
+            // Water materials identified by their hex color (0x00bfd4 and 0x81dfeb)
+            if (
+                materialColor.getHex() === 0x00bfd4 ||
+                materialColor.getHex() === 0x81dfeb
+            ) {
+                isWater = true;
+            }
+        }
+
+        // Calculate the height offset: sink if it's water, otherwise no offset (0)
+        const playerHeightOffset = isWater ? WATER_SINK_DEPTH : 0;
 
         playerModel.position.y = groundHeight + playerHeightOffset;
     } else {
         if (playerModel.position.y > 0) {
-            playerModel.position.y -= 0.1; // Prosta grawitacja
+            playerModel.position.y -= 0.1; // Simple gravity fall
         }
     }
 
@@ -540,29 +645,17 @@ function handlePlayerMovement() {
         playerModel.rotation.y -= rotationSpeed;
     }
 
-    let isWater = false;
+    let isRunning = moving;
 
-    if (intersects.length > 0) {
-        const hitObject = intersects[0].object as THREE.Mesh;
-
-        // Check the color of the hit material
-        if (hitObject.material && "color" in hitObject.material) {
-            const materialColor = (
-                hitObject.material as THREE.MeshStandardMaterial
-            ).color;
-
-            console.log("" + materialColor.getHex().toString(16));
-
-            if (
-                materialColor.getHex() === 0x00bfd4 ||
-                materialColor.getHex() === 0x81dfeb
-            ) {
-                isWater = true;
+    if (isRunning && isWater) {
+        // Trigger splash effect at a timed interval
+        if (clock.getElapsedTime() > lastSplashTime + SPLASH_EMISSION_RATE) {
+            if (playerModel) {
+                spawnSplash(playerModel.position);
             }
+            lastSplashTime = clock.getElapsedTime();
         }
     }
-
-    let isRunning = moving;
 
     if (runAction && walkAction) {
         // Animation and sound logic only runs if controls are NOT locked
@@ -650,34 +743,34 @@ function handlePlayerMovement() {
     }
 }
 
-// Funkcja do aktualizacji pozycji kamery (widok TPP)
+// Function to update the camera position (TPP view)
 function updateCameraPosition(instant: boolean = false) {
     if (!playerModel) return;
 
-    const offset = new THREE.Vector3(0, 3, -7); // Przesunięcie kamery (x, y, z) względem gracza
+    const offset = new THREE.Vector3(0, 3, -7); // Camera offset (x, y, z) relative to player
     const targetPosition = new THREE.Vector3();
 
-    // Ustawienie offsetu w lokalnym układzie współrzędnych gracza
+    // Apply the offset in the player's local coordinate system
     offset.applyQuaternion(playerModel.quaternion);
     targetPosition.copy(playerModel.position).add(offset);
 
     if (instant) {
-        // Ustawienie natychmiastowe (dla startu gry)
+        // Instant setting (for game start)
         camera.position.copy(targetPosition);
     } else {
-        // Płynne podążanie kamery (interpolacja liniowa - lerp)
+        // Smooth camera follow (linear interpolation - lerp)
         camera.position.lerp(targetPosition, 0.05);
     }
 
-    // Kamera zawsze patrzy na gracza (lub punkt nad nim)
+    // Camera always looks at the player (or a point above them)
     const lookAtPoint = playerModel.position
         .clone()
-        .add(new THREE.Vector3(0, 3, 0)); // Patrz na środek/głowę
+        .add(new THREE.Vector3(0, 3, 0)); // Look at center/head
     camera.lookAt(lookAtPoint);
 }
 
 window.addEventListener("keydown", (event) => {
-    // 8. New: Ignore movement keys if controls are locked, but allow rotation
+    // Ignore movement keys if controls are locked, but allow rotation
     if (
         controlsLocked &&
         (event.key === "w" ||
@@ -753,13 +846,15 @@ function animate() {
             frameCount = 0;
         }
 
-        // 2. Update Animations and Physics
+        // 2. Update Animations, Physics, and Particles
         const delta = clock.getDelta();
         if (mixer) {
             mixer.update(delta);
         }
 
         handlePlayerMovement();
+        updateSplashes(delta); // NEW: Update the splash particles
+
         updateCameraPosition();
 
         if (playerModel) {
