@@ -6,6 +6,11 @@ scene.background = new THREE.Color(0x87ceeb)
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.5, 100)
 
+const listener = new THREE.AudioListener()
+camera.add(listener)
+
+const audioLoader = new THREE.AudioLoader()
+
 const renderer = new THREE.WebGLRenderer({ antialias: true })
 renderer.setSize(window.innerWidth, window.innerHeight)
 renderer.shadowMap.enabled = true
@@ -39,6 +44,8 @@ ground.receiveShadow = true
 scene.add(ground)
 
 const loader = new GLTFLoader()
+
+let runningSound: THREE.PositionalAudio | null = null
 
 let playerModel: THREE.Group | null = null
 const moveSpeed = 1.2
@@ -94,10 +101,35 @@ async function createWorld() {
   }
 }
 
+function loadAudio() {
+    if (!playerModel) return
+
+    runningSound = new THREE.PositionalAudio(listener)
+
+    // Load the audio file
+    audioLoader.load('/public/running-on-the-floor-359909.mp3', function(buffer) {
+        if (runningSound) {
+            runningSound.setBuffer(buffer)
+            runningSound.setLoop(true) // Loop the sound for continuous running
+            runningSound.setVolume(0.5) // Adjust volume as needed (0.0 to 1.0)
+            runningSound.setRefDistance(10) // Sound volume drops off after this distance
+        }
+    },
+    undefined,
+    (err) => {
+        console.error('Błąd ładowania dźwięku:', err)
+    })
+
+    // Attach the audio source to the player model
+    playerModel.add(runningSound)
+}
+
 async function createPlayer() {
   try {
     const { model, animations } = await loadModel("Steve.glb")
     playerModel = model
+
+    loadAudio()
 
     playerModel.scale.setScalar(0.75)
     playerModel.position.set(5, 7, 8)
@@ -212,16 +244,21 @@ function handlePlayerMovement() {
     playerModel.rotation.y -= rotationSpeed
   }
 
-  // Logika animacji (na podstawie 'moving')
   if (runAction) {
-      if (moving) {
-          if (!runAction.isRunning()) {
-              runAction.play()
-          }
-      } else {
-          runAction.stop()
-      }
-  }
+     if (moving) {
+         if (!runAction.isRunning()) {
+             runAction.play()
+         }
+         if (runningSound && !runningSound.isPlaying) {
+             runningSound.play()
+         }
+     } else {
+         runAction.stop()
+         if (runningSound && runningSound.isPlaying) {
+             runningSound.stop()
+         }
+     }
+   }
 }
 
 // Funkcja do aktualizacji pozycji kamery (widok TPP)
