@@ -2,7 +2,12 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x87ceeb);
+const skyColor = 0x87ceeb; // Define a variable for the sky color
+scene.background = new THREE.Color(skyColor);
+
+const FOG_NEAR = 1;
+const FOG_FAR = 100;
+scene.fog = new THREE.Fog(skyColor, FOG_NEAR, FOG_FAR);
 
 const camera = new THREE.PerspectiveCamera(
     60,
@@ -312,7 +317,8 @@ function handlePlayerMovement() {
             console.log("" + materialColor.getHex().toString(16));
 
             if (
-                materialColor.getHex() === 0x00bfd4 || materialColor.getHex() === 0x81dfeb
+                materialColor.getHex() === 0x00bfd4 ||
+                materialColor.getHex() === 0x81dfeb
             ) {
                 isWater = true;
             }
