@@ -5,7 +5,7 @@ const scene = new THREE.Scene();
 const skyColor = 0x87ceeb; // Define a variable for the sky color
 scene.background = new THREE.Color(skyColor);
 
-const FOG_NEAR = 1;
+const FOG_NEAR = 50;
 const FOG_FAR = 100;
 scene.fog = new THREE.Fog(skyColor, FOG_NEAR, FOG_FAR);
 
@@ -27,7 +27,7 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.appendChild(renderer.domElement);
 
-const hemiLight = new THREE.HemisphereLight(0xffffff, 0x33ff77, 1.2);
+const hemiLight = new THREE.HemisphereLight(0xffffff, 0xdddddd, 1.2);
 hemiLight.position.set(0, 1000, 0);
 scene.add(hemiLight);
 
@@ -69,6 +69,8 @@ const down = new THREE.Vector3(0, -1, 0);
 
 const worldObjects: THREE.Mesh[] = [];
 
+const clouds: THREE.Group[] = [];
+
 let mixer: THREE.AnimationMixer | null = null;
 let runAction: THREE.AnimationAction | null = null;
 let walkAction: THREE.AnimationAction | null = null;
@@ -95,6 +97,60 @@ async function loadModel(
             (err) => reject(err),
         );
     });
+}
+
+function createCloud(): THREE.Group {
+    const cloud = new THREE.Group();
+    const cloudMaterial = new THREE.MeshLambertMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0.2,
+    });
+
+    for (let i = 0; i < 8; i++) {
+        const sphereGeometry = new THREE.SphereGeometry(
+            Math.random() * 2 + 1,
+            8,
+            8,
+        );
+        const sphere = new THREE.Mesh(sphereGeometry, cloudMaterial);
+
+        sphere.position.set(
+            Math.random() * 4 - 2,
+            Math.random() * 2 - 1,
+            Math.random() * 4 - 2,
+        );
+
+        sphere.castShadow = true;
+        cloud.add(sphere);
+    }
+
+    return cloud;
+}
+
+function createClouds() {
+    const cloudCount = 100;
+    const areaSize = 500; // Define the horizontal area for clouds
+    const altitude = 25;  // Define the base altitude for clouds
+
+    for (let i = 0; i < cloudCount; i++) {
+        // Randomize horizontal position within the area
+        const x = (Math.random() - 0.5) * areaSize;
+        const z = (Math.random() - 0.5) * areaSize;
+        // Slightly vary the altitude
+        const y = altitude + Math.random() * 20;
+
+        const cloud = createCloud();
+
+        const scaleFactor = Math.random() * 1 + 1;
+        cloud.scale.setScalar(scaleFactor);
+
+        // Set the final position of the entire cloud group
+        cloud.position.set(x, y, z);
+
+        scene.add(cloud);
+        clouds.push(cloud);
+    }
 }
 
 async function createWorld() {
@@ -317,8 +373,7 @@ function handlePlayerMovement() {
             console.log("" + materialColor.getHex().toString(16));
 
             if (
-                materialColor.getHex() === 0x00bfd4 ||
-                materialColor.getHex() === 0x81dfeb
+                materialColor.getHex() === 0x00bfd4 || materialColor.getHex() === 0x81dfeb
             ) {
                 isWater = true;
             }
@@ -438,6 +493,7 @@ window.addEventListener("keyup", (event) => {
 });
 
 createWorld();
+createClouds();
 createPlayer();
 
 function animate() {
@@ -450,6 +506,20 @@ function animate() {
 
     handlePlayerMovement();
     updateCameraPosition();
+
+    // --- Handle cloud movement ---
+    clouds.forEach((cloud) => {
+        // Move slowly along the X axis (to simulate wind)
+        cloud.position.x += 0.05 * delta;
+
+        // Wrap around to simulate endless clouds
+        if (cloud.position.x > 150) {
+            cloud.position.x = -150; // Wrap around to the other side
+            // Randomize Z position slightly to prevent repeating patterns
+            cloud.position.z = (Math.random() - 0.5) * 300;
+        }
+    });
+    // ----------------------------------
 
     renderer.render(scene, camera);
 }
