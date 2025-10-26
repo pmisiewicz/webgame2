@@ -1,6 +1,10 @@
 import * as THREE from "three";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
+import { GLTFLoader, type GLTF } from "three/addons/loaders/GLTFLoader.js";
 import { MeshBVH, acceleratedRaycast } from "three-mesh-bvh";
+
+import runningSoundUrl from "/public/running-on-the-floor-359909.mp3";
+import waterSoundUrl from "/public/walking-in-water-199418.mp3";
+import bumpSoundUrl from "/public/manbonk-357114.mp3";
 
 const scene = new THREE.Scene();
 const skyColor = 0x87ceeb; // Define a variable for the sky color
@@ -72,8 +76,7 @@ const BUMP_DISTANCE = 2;
 const keys: { [key: string]: boolean } = {};
 let controlsLocked: boolean = false;
 
-const tempMoveVector = new THREE.Vector3();
-const tempNextPosition = new THREE.Vector3();
+// The following unused variables were removed: tempMoveVector and tempNextPosition
 const tempBumpVector = new THREE.Vector3(); // Used for bump calculation
 
 const raycaster = new THREE.Raycaster();
@@ -95,9 +98,9 @@ async function loadModel(
     return new Promise((resolve, reject) => {
         loader.load(
             `/models/${name}`,
-            (gltf) => {
+            (gltf: GLTF) => { // Type 'gltf' as GLTF
                 const model = gltf.scene;
-                model.traverse((child) => {
+                model.traverse((child: THREE.Object3D) => { // Type 'child' as THREE.Object3D
                     if ((child as THREE.Mesh).isMesh) {
                         const mesh = child as THREE.Mesh;
                         mesh.castShadow = true;
@@ -107,7 +110,7 @@ async function loadModel(
                 resolve({ model, animations: gltf.animations });
             },
             undefined,
-            (err) => reject(err),
+            (err: unknown) => reject(err), // FIX: Changed type from ErrorEvent to unknown
         );
     });
 }
@@ -118,7 +121,7 @@ function createSun() {
     // Main sun sphere - bright yellow/orange
     const sunGeometry = new THREE.SphereGeometry(8, 32, 32);
     const sunMaterial = new THREE.MeshBasicMaterial({
-        color: 0xfdb813, // Warm golden yellow
+        color: 0xfdb813, // Warm golden golden yellow
         transparent: false,
     });
     const sun = new THREE.Mesh(sunGeometry, sunMaterial);
@@ -214,6 +217,11 @@ function createClouds() {
     }
 }
 
+// FIX: Improved type guard to correctly check for Mesh properties
+function isMesh(child: THREE.Object3D): child is THREE.Mesh {
+    return (child as THREE.Mesh).isMesh === true && 'geometry' in child;
+}
+
 async function createWorld() {
     try {
         const { model } = await loadModel("Nature.glb");
@@ -221,12 +229,19 @@ async function createWorld() {
         model.position.set(0, 10, 0);
 
         model.traverse((child) => {
-            if ((child as THREE.Mesh).isMesh) {
-                worldObjects.push(child as THREE.Mesh);
-                if (child.geometry.isBufferGeometry) {
+            // Check if the child is a Mesh and has a geometry property
+            if (isMesh(child)) {
+                worldObjects.push(child);
+
+                // Use BufferGeometry to access computeVertexNormals
+                const geometry = child.geometry as THREE.BufferGeometry;
+
+                if (geometry.isBufferGeometry) {
                     // Ensures the raycaster can return a 'face' and 'face.normal' - this fixes shadows!
-                    child.geometry.computeVertexNormals();
-                    (child.geometry as any).boundsTree = new MeshBVH(child.geometry);
+                    geometry.computeVertexNormals();
+
+                    // Create and assign MeshBVH to the geometry (required for accelerated raycasting)
+                    (geometry as any).boundsTree = new MeshBVH(geometry);
                     child.raycast = acceleratedRaycast;
                 }
             }
@@ -244,7 +259,8 @@ function loadAudio() {
     // Setup for Running Sound (Grass)
     runningSound = new THREE.PositionalAudio(listener);
     audioLoader.load(
-        "/public/running-on-the-floor-359909.mp3",
+        // Use the imported URL
+        runningSoundUrl,
         function (buffer) {
             if (runningSound) {
                 runningSound.setBuffer(buffer);
@@ -263,7 +279,8 @@ function loadAudio() {
     // Setup for Water Sound
     waterSound = new THREE.PositionalAudio(listener);
     audioLoader.load(
-        "/public/walking-in-water-199418.mp3",
+        // Use the imported URL
+        waterSoundUrl,
         function (buffer) {
             if (waterSound) {
                 waterSound.setBuffer(buffer);
@@ -281,7 +298,8 @@ function loadAudio() {
 
     bumpSound = new THREE.PositionalAudio(listener);
     audioLoader.load(
-        "/public/manbonk-357114.mp3",
+        // Use the imported URL
+        bumpSoundUrl,
         function (buffer) {
             if (bumpSound) {
                 bumpSound.setBuffer(buffer);
