@@ -4,7 +4,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader'
 const scene = new THREE.Scene()
 scene.background = new THREE.Color(0x87ceeb)
 
-const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 500)
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.5, 100)
 
 const renderer = new THREE.WebGLRenderer({ antialias: true })
 renderer.setSize(window.innerWidth, window.innerHeight)
@@ -41,8 +41,8 @@ scene.add(ground)
 const loader = new GLTFLoader()
 
 let playerModel: THREE.Group | null = null
-const moveSpeed = 1.5
-const rotationSpeed = 0.02
+const moveSpeed = 1.2
+const rotationSpeed = 0.015
 const MAX_STEP_HEIGHT = 0.66
 const keys: { [key: string]: boolean } = {}
 
