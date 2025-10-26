@@ -39,7 +39,7 @@ hemiLight.position.set(0, 100, 0);
 scene.add(hemiLight);
 
 const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
-dirLight.position.set(50, 50, 50);
+dirLight.position.set(50, 25, 50);
 dirLight.target.position.set(0, 0, 0);
 dirLight.castShadow = true;
 const shadowSize = 25;
@@ -223,8 +223,8 @@ function createCloud(): THREE.Group {
 }
 
 function createClouds() {
-    const cloudCount = 100;
-    const areaSize = 500; // Define the horizontal area for clouds
+    const cloudCount = 25;
+    const areaSize = 250; // Define the horizontal area for clouds
     const altitude = 25; // Define the base altitude for clouds
 
     for (let i = 0; i < cloudCount; i++) {
