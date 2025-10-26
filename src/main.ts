@@ -2,6 +2,8 @@ import * as THREE from "three";
 import { GLTFLoader, type GLTF } from "three/addons/loaders/GLTFLoader.js";
 import { MeshBVH, acceleratedRaycast } from "three-mesh-bvh";
 
+// FIX: Import audio assets directly to ensure the build system handles their
+// public path and correct MIME type in the preview/production build.
 import runningSoundUrl from "/public/running-on-the-floor-359909.mp3";
 import waterSoundUrl from "/public/walking-in-water-199418.mp3";
 import bumpSoundUrl from "/public/manbonk-357114.mp3";
@@ -67,10 +69,10 @@ let waterSound: THREE.PositionalAudio | null = null;
 let bumpSound: THREE.PositionalAudio | null = null;
 
 let playerModel: THREE.Group | null = null;
-const RUN_SPEED = 0.5;
-const WALK_SPEED = 0.25;
+const RUN_SPEED = 1.2;
+const WALK_SPEED = 0.6;
 let moveSpeed = RUN_SPEED;
-const rotationSpeed = 0.015;
+const rotationSpeed = 0.035;
 const MAX_STEP_HEIGHT = 0.66;
 const BUMP_DISTANCE = 2;
 const keys: { [key: string]: boolean } = {};
@@ -91,12 +93,14 @@ let walkAction: THREE.AnimationAction | null = null;
 let fallAction: THREE.AnimationAction | null = null;
 const clock = new THREE.Clock();
 
-// --- FPS Counter Variables ---
+const FPS_LIMIT = 60;
+const interval = 1000 / FPS_LIMIT;
+let then = performance.now();
+
 let fpsElement: HTMLElement | null = null;
 let frameCount = 0;
 let lastTime = performance.now();
-const fpsInterval = 1000; // Update every second (1000ms)
-// -----------------------------
+const fpsInterval = 1000;
 
 async function loadModel(
     name: string,
@@ -223,6 +227,7 @@ function createClouds() {
     }
 }
 
+// FIX: Improved type guard to correctly check for Mesh properties
 function isMesh(child: THREE.Object3D): child is THREE.Mesh {
     return (child as THREE.Mesh).isMesh === true && 'geometry' in child;
 }
@@ -466,7 +471,7 @@ function handlePlayerMovement() {
                 .copy(failedMovementVector)
                 .negate()
                 .normalize()
-                .multiplyScalar(BUMP_DISTANCE); // Use the defined BUMP_DISTANCE
+                .multiplyScalar(BUMP_DISTANCE);
 
             // 3. Update targetPosition to be the original position PLUS the bump.
             // This is the final X/Z position for this frame.
@@ -483,11 +488,11 @@ function handlePlayerMovement() {
             if (fallAction) {
                 fallAction.reset().play();
 
-                // 6. New: Lock controls for 3 seconds
+                // 6. New: Lock controls
                 controlsLocked = true;
                 setTimeout(() => {
                     controlsLocked = false;
-                }, 1000); // 3000 milliseconds = 3 seconds
+                }, 1000);
 
                 // 7. New: Play bump sound
                 if (bumpSound && !bumpSound.isPlaying) {
@@ -722,52 +727,63 @@ createWorld();
 createSun();
 createClouds();
 createPlayer();
-setupFpsCounter();
+setupFpsCounter(); // Setup the FPS counter before starting the animation loop
 
 function animate() {
     requestAnimationFrame(animate);
 
     const now = performance.now();
-    frameCount++;
+    const elapsed = now - then;
 
-    // Update FPS display every second
-    if (now > lastTime + fpsInterval) {
-        const fps = Math.round((frameCount * 1000) / (now - lastTime));
-        if (fpsElement) {
-            fpsElement.textContent = `FPS: ${fps}`;
+    // --- FPS CAP LOGIC ---
+    if (elapsed > interval) {
+        // Get ready for next frame by adjusting for the time lag
+        then = now - (elapsed % interval);
+
+        // --- CORE GAME LOOP LOGIC (Only runs when frame is drawn) ---
+
+        // 1. Update FPS Counter
+        frameCount++;
+        if (now > lastTime + fpsInterval) {
+            const fps = Math.round((frameCount * 1000) / (now - lastTime));
+            if (fpsElement) {
+                fpsElement.textContent = `FPS: ${fps}`;
+            }
+            lastTime = now;
+            frameCount = 0;
         }
-        lastTime = now;
-        frameCount = 0;
+
+        // 2. Update Animations and Physics
+        const delta = clock.getDelta();
+        if (mixer) {
+            mixer.update(delta);
+        }
+
+        handlePlayerMovement();
+        updateCameraPosition();
+
+        if (playerModel) {
+            const playerX = playerModel.position.x;
+            const playerZ = playerModel.position.z;
+
+            dirLight.target.position.set(playerX, 0, playerZ);
+
+            const offsetX = 50;
+            const offsetY = 50;
+            const offsetZ = 50;
+
+            dirLight.position.set(
+                playerX + offsetX,
+                offsetY, // Keep light at a fixed height
+                playerZ + offsetZ,
+            );
+
+            dirLight.target.updateMatrixWorld();
+        }
+
+        // 3. Render
+        renderer.render(scene, camera);
     }
-
-    const delta = clock.getDelta();
-    if (mixer) {
-        mixer.update(delta);
-    }
-
-    handlePlayerMovement();
-    updateCameraPosition();
-
-    if (playerModel) {
-        const playerX = playerModel.position.x;
-        const playerZ = playerModel.position.z;
-
-        dirLight.target.position.set(playerX, 0, playerZ);
-
-        const offsetX = 50;
-        const offsetY = 50;
-        const offsetZ = 50;
-
-        dirLight.position.set(
-            playerX + offsetX,
-            offsetY, // Keep light at a fixed height
-            playerZ + offsetZ,
-        );
-
-        dirLight.target.updateMatrixWorld();
-    }
-
-    renderer.render(scene, camera);
 }
 
 animate();
