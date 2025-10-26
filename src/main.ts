@@ -41,9 +41,15 @@ scene.add(ground)
 const loader = new GLTFLoader()
 
 let playerModel: THREE.Group | null = null
-const moveSpeed = 0.5
-const rotationSpeed = 0.01
+const moveSpeed = 1.5
+const rotationSpeed = 0.02
+const MAX_STEP_HEIGHT = 0.66
 const keys: { [key: string]: boolean } = {}
+
+const raycaster = new THREE.Raycaster()
+const down = new THREE.Vector3(0, -1, 0)
+
+const worldObjects: THREE.Mesh[] = []
 
 let mixer: THREE.AnimationMixer | null = null
 let runAction: THREE.AnimationAction | null = null
@@ -76,6 +82,12 @@ async function createWorld() {
     model.scale.setScalar(50)
     model.position.set(0, 10, 0)
 
+    model.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) {
+          worldObjects.push(child as THREE.Mesh)
+      }
+    })
+
     scene.add(model)
   } catch (err) {
     console.warn("Błąd ładowania modelu Nature.glb:", err)
@@ -95,7 +107,7 @@ async function createPlayer() {
     if (animations && animations.length > 0) {
         mixer = new THREE.AnimationMixer(playerModel)
 
-        const runClip = animations.find(clip => clip.name === 'CharacterArmature|CharacterArmature|CharacterArmature|Walk')
+        const runClip = animations.find(clip => clip.name === 'CharacterArmature|CharacterArmature|CharacterArmature|Run')
 
         if (runClip) {
             runAction = mixer.clipAction(runClip)
@@ -116,23 +128,83 @@ async function createPlayer() {
 function handlePlayerMovement() {
   if (!playerModel) return
 
-  // Kierunek ruchu
+  const originalPosition = playerModel.position.clone()
   let moving = false
+  let targetPosition = playerModel.position.clone()
+
   if (keys['w'] || keys['W'] || keys['ArrowUp']) {
     const forwardVector = new THREE.Vector3(0, 0, -0.1)
     forwardVector.applyQuaternion(playerModel.quaternion)
-    playerModel.position.addScaledVector(forwardVector, -moveSpeed)
+    targetPosition.addScaledVector(forwardVector, -moveSpeed)
     moving = true
   }
   if (keys['s'] || keys['S'] || keys['ArrowDown']) {
-    // Poruszanie do tyłu
     const backwardVector = new THREE.Vector3(0, 0, -0.1)
     backwardVector.applyQuaternion(playerModel.quaternion)
-    playerModel.position.addScaledVector(backwardVector, moveSpeed)
+    targetPosition.addScaledVector(backwardVector, moveSpeed)
     moving = true
   }
 
-  // Obrót
+  if (moving) {
+    const currentOrigin = originalPosition.clone()
+    currentOrigin.y += 20
+    raycaster.set(currentOrigin, down)
+    const currentIntersects = raycaster.intersectObjects(worldObjects, true)
+
+    let currentGroundHeight = originalPosition.y - 1 // Domyślna minimalna wysokość, jeśli raycast zawiedzie
+    if (currentIntersects.length > 0) {
+        currentGroundHeight = currentOrigin.y - currentIntersects[0].distance
+    }
+
+    // Sprawdź potencjalną pozycję (X i Z z targetPosition, ale Y wysoko)
+    const nextOrigin = targetPosition.clone()
+    nextOrigin.y = originalPosition.y + 20 // Ustaw wysoko dla raycasta
+
+    raycaster.set(nextOrigin, down)
+    const nextIntersects = raycaster.intersectObjects(worldObjects, true)
+
+    let nextGroundHeight = currentGroundHeight // Jeśli brak terenu, przyjmij obecną wysokość
+    if (nextIntersects.length > 0) {
+        nextGroundHeight = nextOrigin.y - nextIntersects[0].distance
+    }
+
+    // Sprawdź, czy różnica wysokości jest zbyt duża
+    const heightDifference = nextGroundHeight - currentGroundHeight
+
+    if (heightDifference > MAX_STEP_HEIGHT) {
+        // Zatrzymanie ruchu: potencjalna pozycja Z i X jest ignorowana
+        // targetPosition pozostaje taka sama jak originalPosition (oprócz Y)
+        targetPosition.x = originalPosition.x
+        targetPosition.z = originalPosition.z
+        moving = false // Zatrzymanie animacji biegu
+    }
+  }
+
+  // 2. Faktyczne przesunięcie po weryfikacji
+  playerModel.position.x = targetPosition.x
+  playerModel.position.z = targetPosition.z
+
+  // 3. Raycasting w dół, aby ustawić wysokość Y w NOWEJ pozycji (targetPosition/originalPosition)
+  const finalOrigin = playerModel.position.clone()
+  finalOrigin.y += 20
+
+  raycaster.set(finalOrigin, down)
+
+  const intersects = raycaster.intersectObjects(worldObjects, true)
+
+  if (intersects.length > 0) {
+      const distanceToGround = intersects[0].distance
+      const groundHeight = finalOrigin.y - distanceToGround
+      const playerHeightOffset = 0
+
+      playerModel.position.y = groundHeight + playerHeightOffset
+  } else {
+      // Jeśli nie ma terenu, ustaw na stałą wysokość minimalną lub zaimplementuj spadanie
+      if (playerModel.position.y > 0) {
+          playerModel.position.y -= 0.1 // Prosta grawitacja
+      }
+  }
+
   if (keys['a'] || keys['A'] || keys['ArrowLeft']) {
     playerModel.rotation.y += rotationSpeed
   }
@@ -140,20 +212,14 @@ function handlePlayerMovement() {
     playerModel.rotation.y -= rotationSpeed
   }
 
-  // Ograniczenie wysokości, aby nie przeniknąć przez ziemię
-  if (playerModel.position.y < 7) {
-      playerModel.position.y = 7
-  }
-
+  // Logika animacji (na podstawie 'moving')
   if (runAction) {
       if (moving) {
           if (!runAction.isRunning()) {
               runAction.play()
           }
       } else {
-          // Aby animacja zatrzymywała się płynnie, możemy użyć fadeOut
-          //runAction.fadeOut(0.5) // Płynne zatrzymanie
-          runAction.stop() // Natychmiastowe zatrzymanie
+          runAction.stop()
       }
   }
 }
