@@ -4,8 +4,9 @@ import {acceleratedRaycast, MeshBVH} from "three-mesh-bvh";
 
 import runningSoundUrl from "/src/sfx/running-in-grass-6237.mp3";
 import waterSoundUrl from "/src/sfx/walking-in-water-199418.mp3";
-import bumpSoundUrl from "/src/sfx/manbonk-357114.mp3";
+import bumpSoundUrl from "/src/sfx/boing2-418548.mp3";
 import forestAtmosphereUrl from "/src/sfx/forest-atmosphere-001localization-poland-329745.mp3";
+import animalHitSoundUrl from "/src/sfx/cartoon-fiasco-144748.mp3";
 
 const scene = new THREE.Scene();
 const skyColor = 0x87ceeb;
@@ -66,6 +67,7 @@ let runningSound: THREE.PositionalAudio | null = null;
 let waterSound: THREE.PositionalAudio | null = null;
 let bumpSound: THREE.PositionalAudio | null = null;
 let backgroundMusic: THREE.Audio | null = null;
+let animalHitSound: THREE.PositionalAudio | null = null;
 
 let playerModel: THREE.Group | null = null;
 const RUN_SPEED = 1.2;
@@ -540,6 +542,25 @@ function loadAudio() {
             console.error("Error loading background music:", err);
         },
     );
+
+    // Load animal hit sound
+    animalHitSound = new THREE.PositionalAudio(listener);
+    audioLoader.load(
+        animalHitSoundUrl,
+        function (buffer) {
+            if (animalHitSound) {
+                animalHitSound.setBuffer(buffer);
+                animalHitSound.setLoop(false);
+                animalHitSound.setVolume(1);
+                animalHitSound.setRefDistance(10);
+            }
+        },
+        undefined,
+        (err) => {
+            console.error("Error loading animal hit sound:", err);
+        },
+    );
+    playerModel.add(animalHitSound);
 }
 
 async function createPlayer() {
@@ -841,7 +862,8 @@ function handlePlayerMovement() {
                     controlsLocked = false;
                 }, 1000);
 
-                if (bumpSound && !bumpSound.isPlaying) {
+                // Only play bump sound for walls/obstacles, not for animals
+                if (!hitAnimal && bumpSound && !bumpSound.isPlaying) {
                     bumpSound.play();
                 }
 
@@ -852,6 +874,11 @@ function handlePlayerMovement() {
             // Trigger animal death animation if we hit an animal
             if (hitAnimal && collidedAnimal) {
                 playAnimalDeathAnimation(collidedAnimal);
+
+                // Play animal hit sound (without bump sound)
+                if (animalHitSound && !animalHitSound.isPlaying) {
+                    animalHitSound.play();
+                }
             }
         }
     }
