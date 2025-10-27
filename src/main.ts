@@ -87,6 +87,28 @@ const worldObjects: THREE.Mesh[] = [];
 
 const clouds: THREE.Group[] = [];
 
+const animalModels = [
+    "Alpaca.gltf",
+    "Deer.gltf",
+    "Fox.gltf",
+    "Horse.gltf",
+    "Horse_White.gltf",
+    "Husky.gltf",
+    "ShibaInu.gltf",
+    "Stag.gltf",
+    "Wolf.gltf"
+];
+
+const animals: THREE.Group[] = [];
+
+interface AnimalInstance {
+    model: THREE.Group;
+    mixer: THREE.AnimationMixer | null;
+    action: THREE.AnimationAction | null;
+}
+
+const animalInstances: AnimalInstance[] = [];
+
 let mixer: THREE.AnimationMixer | null = null;
 let runAction: THREE.AnimationAction | null = null;
 let walkAction: THREE.AnimationAction | null = null;
@@ -272,6 +294,147 @@ async function createWorld() {
     } catch (err) {
         console.warn("Błąd ładowania modelu Nature.glb:", err);
     }
+}
+
+async function spawnAnimals(count: number) {
+    const areaSize = 300;
+    const spawnAttempts = 15; // Increase attempts to find better spots
+
+    for (let i = 0; i < count; i++) {
+        // Pick a random animal model
+        const randomAnimalModel = animalModels[Math.floor(Math.random() * animalModels.length)];
+
+        try {
+            const {model, animations} = await loadModel(randomAnimalModel);
+
+            // Random scale variation for each animal
+            const scaleFactor = 0.4 + Math.random() * 0.3; // 0.4 to 0.7
+            model.scale.setScalar(scaleFactor);
+
+            // Random rotation
+            model.rotation.y = Math.random() * Math.PI * 2;
+
+            // Try to find a valid position on the ground
+            let validPosition = false;
+            let attempts = 0;
+
+            while (!validPosition && attempts < spawnAttempts) {
+                attempts++;
+
+                // Random position
+                const x = (Math.random() - 0.5) * areaSize;
+                const z = (Math.random() - 0.5) * areaSize;
+                const y = 50; // Start high and raycast down
+
+                // Raycast down to find ground
+                const origin = new THREE.Vector3(x, y, z);
+                raycaster.set(origin, down);
+                const intersects = raycaster.intersectObjects(worldObjects, true);
+
+                if (intersects.length > 0) {
+                    const groundY = intersects[0].point.y;
+                    const hitPoint = intersects[0].point;
+                    const hitObject = intersects[0].object as THREE.Mesh;
+
+                    // Get the surface normal at the hit point
+                    const face = intersects[0].face;
+                    let surfaceNormal = new THREE.Vector3(0, 1, 0); // Default upward normal
+
+                    if (face) {
+                        surfaceNormal = face.normal.clone();
+                        // Transform normal to world space
+                        surfaceNormal.transformDirection(hitObject.matrixWorld);
+                    }
+
+                    // Check if the surface is too steep (slope check)
+                    // A perfectly flat surface has normal (0, 1, 0), dot product = 1
+                    // A 45-degree slope has dot product ~0.707
+                    const upVector = new THREE.Vector3(0, 1, 0);
+                    const slopeDot = surfaceNormal.dot(upVector);
+                    const minSlopeDot = 0.85; // Roughly 30 degrees max slope
+
+                    // Check if it's not water
+                    let isWater = false;
+                    if (hitObject.material && "color" in hitObject.material) {
+                        const materialColor = (hitObject.material as THREE.MeshStandardMaterial).color;
+                        if (materialColor.getHex() === 0x00bfd4 || materialColor.getHex() === 0x81dfeb) {
+                            isWater = true;
+                        }
+                    }
+
+                    // Additional check: make sure there's clearance above (not under a tree canopy)
+                    const clearanceHeight = 3.0;
+                    const clearanceOrigin = hitPoint.clone();
+                    clearanceOrigin.y += 0.1; // Start just above ground
+                    const upRay = new THREE.Vector3(0, 1, 0);
+                    raycaster.set(clearanceOrigin, upRay);
+                    raycaster.far = clearanceHeight;
+                    const clearanceIntersects = raycaster.intersectObjects(worldObjects, true);
+                    raycaster.far = Infinity;
+
+                    const hasClearance = clearanceIntersects.length === 0;
+
+                    // Accept position if: not water, not too steep, has clearance, and not too high
+                    const maxHeight = 15; // Don't spawn too high up (on tall rocks/trees)
+                    if (!isWater && slopeDot >= minSlopeDot && hasClearance && groundY < maxHeight) {
+                        model.position.set(x, groundY, z);
+                        validPosition = true;
+                    }
+                }
+            }
+
+            if (!validPosition) {
+                model.position.set(0, 0, 0);
+            }
+
+            model.traverse((child) => {
+                if ((child as THREE.Mesh).isMesh) {
+                    const mesh = child as THREE.Mesh;
+                    mesh.castShadow = true;
+                    mesh.receiveShadow = true;
+                }
+            });
+
+            let animalMixer: THREE.AnimationMixer | null = null;
+            let animalAction: THREE.AnimationAction | null = null;
+
+            if (animations && animations.length > 0) {
+                const allowedAnimations = animations.filter(clip => {
+                    const name = clip.name.toLowerCase();
+                    return (name.includes('eating') || name.includes('idle'))
+                        && !name.includes('jump')
+                        && !name.includes('hit');
+                });
+
+                if (allowedAnimations.length > 0) {
+                    animalMixer = new THREE.AnimationMixer(model);
+
+                    // Pick a random animation clip from allowed animations
+                    const randomClip = allowedAnimations[Math.floor(Math.random() * allowedAnimations.length)];
+                    animalAction = animalMixer.clipAction(randomClip);
+                    animalAction.setLoop(THREE.LoopRepeat, Infinity);
+                    animalAction.play();
+
+                    console.log(`Playing animation "${randomClip.name}" for ${randomAnimalModel}`);
+                } else {
+                    console.log(`No Eating/Idle animations found for ${randomAnimalModel}`);
+                }
+            }
+
+            scene.add(model);
+            animals.push(model);
+            animalInstances.push({
+                model: model,
+                mixer: animalMixer,
+                action: animalAction
+            });
+
+        } catch (err) {
+            console.warn(`Failed to load animal model ${randomAnimalModel}:`, err);
+        }
+    }
+
+    console.log(`Spawned ${animals.length} animals on the map`);
 }
 
 function loadAudio() {
@@ -547,7 +710,19 @@ function handlePlayerMovement() {
             }
         }
 
-        if (heightDifference > MAX_STEP_HEIGHT || hitWall) {
+        let hitAnimal = false;
+        const animalCollisionRadius = 0.8;
+        const combinedRadius = COLLISION_RADIUS + animalCollisionRadius;
+
+        for (const animal of animals) {
+            const futureDistance = targetPosition.distanceTo(animal.position);
+            if (futureDistance < combinedRadius) {
+                hitAnimal = true;
+                break;
+            }
+        }
+
+        if (heightDifference > MAX_STEP_HEIGHT || hitWall || hitAnimal) {
             const failedMovementVector = targetPosition
                 .clone()
                 .sub(originalPosition);
@@ -795,11 +970,14 @@ function setupFpsCounter() {
     document.body.appendChild(fpsElement);
 }
 
-createWorld();
 createSun();
 createClouds();
 createPlayer();
 setupFpsCounter();
+
+createWorld().then(() => {
+    spawnAnimals(25);
+});
 
 function animate() {
     requestAnimationFrame(animate);
@@ -823,6 +1001,13 @@ function animate() {
         const delta = clock.getDelta();
         if (mixer) {
             mixer.update(delta);
+        }
+
+        // Update animal animations
+        for (const animalInstance of animalInstances) {
+            if (animalInstance.mixer) {
+                animalInstance.mixer.update(delta);
+            }
         }
 
         handlePlayerMovement();
