@@ -6,7 +6,7 @@ import runningSoundUrl from "/src/sfx/running-in-grass-6237.mp3";
 import waterSoundUrl from "/src/sfx/walking-in-water-199418.mp3";
 import bumpSoundUrl from "/src/sfx/boing2-418548.mp3";
 import forestAtmosphereUrl from "/src/sfx/forest-atmosphere-001localization-poland-329745.mp3";
-import animalHitSoundUrl from "/src/sfx/cartoon-fiasco-144748.mp3";
+import animalHitSoundUrl from "/src/sfx/small-monster-attack-195712.mp3";
 
 const scene = new THREE.Scene();
 const skyColor = 0x87ceeb;
@@ -119,6 +119,30 @@ interface AnimalInstance {
 }
 
 const animalInstances: AnimalInstance[] = [];
+
+// Spider enemy system
+interface SpiderInstance {
+    model: THREE.Group;
+    mixer: THREE.AnimationMixer | null;
+    walkAction: THREE.AnimationAction | null;
+    attackAction: THREE.AnimationAction | null;
+    isChasing: boolean;
+    moveSpeed: number;
+    isAttacking: boolean;
+    isJumpingBack: boolean;
+    jumpBackStartTime: number;
+    jumpBackDuration: number;
+    jumpBackStartPos: THREE.Vector3 | null;
+    jumpBackEndPos: THREE.Vector3 | null;
+}
+
+const spiders: SpiderInstance[] = [];
+const SPIDER_DETECTION_RANGE = 10;
+const SPIDER_CHASE_SPEED = 0.05;
+const SPIDER_WANDER_SPEED = 0.02;
+const SPIDER_COLLISION_RADIUS = 0.6;
+const SPIDER_JUMP_BACK_DISTANCE = 2;
+const SPIDER_JUMP_BACK_DURATION = 0.5;
 
 let mixer: THREE.AnimationMixer | null = null;
 let runAction: THREE.AnimationAction | null = null;
@@ -502,6 +526,255 @@ async function spawnAnimals(count: number) {
     console.log(`Spawned ${animals.length} animals on the map`);
 }
 
+async function spawnSpiders(count: number) {
+    const areaSize = 300;
+    const spawnAttempts = 15;
+
+    for (let i = 0; i < count; i++) {
+        try {
+            const {model, animations} = await loadModel("Spider.glb");
+
+            incrementLoadingProgress(`Loading Spiders... (${i + 1}/${count})`);
+
+            // Spider scale
+            const scaleFactor = 0.5;
+            model.scale.setScalar(scaleFactor);
+
+            // Random rotation
+            model.rotation.y = Math.random() * Math.PI * 2;
+
+            // Try to find a valid position on the ground
+            let validPosition = false;
+            let attempts = 0;
+
+            while (!validPosition && attempts < spawnAttempts) {
+                attempts++;
+
+                const x = (Math.random() - 0.5) * areaSize;
+                const z = (Math.random() - 0.5) * areaSize;
+                const y = 50;
+
+                const origin = new THREE.Vector3(x, y, z);
+                raycaster.set(origin, down);
+                const intersects = raycaster.intersectObjects(worldObjects, true);
+
+                if (intersects.length > 0) {
+                    const groundY = intersects[0].point.y;
+                    const hitPoint = intersects[0].point;
+                    const hitObject = intersects[0].object as THREE.Mesh;
+
+                    const face = intersects[0].face;
+                    let surfaceNormal = new THREE.Vector3(0, 1, 0);
+
+                    if (face) {
+                        surfaceNormal = face.normal.clone();
+                        surfaceNormal.transformDirection(hitObject.matrixWorld);
+                    }
+
+                    const upVector = new THREE.Vector3(0, 1, 0);
+                    const slopeDot = surfaceNormal.dot(upVector);
+                    const minSlopeDot = 0.85;
+
+                    let isWater = false;
+                    if (hitObject.material && "color" in hitObject.material) {
+                        const materialColor = (hitObject.material as THREE.MeshStandardMaterial).color;
+                        if (materialColor.getHex() === 0x00bfd4 || materialColor.getHex() === 0x81dfeb) {
+                            isWater = true;
+                        }
+                    }
+
+                    const clearanceHeight = 3.0;
+                    const clearanceOrigin = hitPoint.clone();
+                    clearanceOrigin.y += 0.1;
+                    const upRay = new THREE.Vector3(0, 1, 0);
+                    raycaster.set(clearanceOrigin, upRay);
+                    raycaster.far = clearanceHeight;
+                    const clearanceIntersects = raycaster.intersectObjects(worldObjects, true);
+                    raycaster.far = Infinity;
+
+                    const hasClearance = clearanceIntersects.length === 0;
+                    const maxHeight = 15;
+
+                    if (!isWater && slopeDot >= minSlopeDot && hasClearance && groundY < maxHeight) {
+                        model.position.set(x, groundY, z);
+                        validPosition = true;
+                    }
+                }
+            }
+
+            if (!validPosition) {
+                model.position.set(0, 0, 0);
+            }
+
+            model.traverse((child) => {
+                if ((child as THREE.Mesh).isMesh) {
+                    const mesh = child as THREE.Mesh;
+                    mesh.castShadow = true;
+                    mesh.receiveShadow = true;
+                }
+            });
+
+            let spiderMixer: THREE.AnimationMixer | null = null;
+            let spiderWalkAction: THREE.AnimationAction | null = null;
+            let spiderAttackAction: THREE.AnimationAction | null = null;
+
+            if (animations && animations.length > 0) {
+                spiderMixer = new THREE.AnimationMixer(model);
+
+                // Find walk/idle animation
+                const walkClip = animations.find(clip => {
+                    const name = clip.name.toLowerCase();
+                    console.log(clip.name.toLowerCase())
+                    return name.includes('walk');
+                });
+
+                // Find attack animation
+                const attackClip = animations.find(clip => {
+                    const name = clip.name.toLowerCase();
+                    return name.includes('attack') || name.includes('bite');
+                });
+
+                if (walkClip) {
+                    spiderWalkAction = spiderMixer.clipAction(walkClip);
+                    spiderWalkAction.setLoop(THREE.LoopRepeat, Infinity);
+                    spiderWalkAction.play();
+                    console.log(`Spider playing animation "${walkClip.name}"`);
+                } else if (animations.length > 0) {
+                    // Just use the first animation if no walk found
+                    spiderWalkAction = spiderMixer.clipAction(animations[0]);
+                    spiderWalkAction.setLoop(THREE.LoopRepeat, Infinity);
+                    spiderWalkAction.play();
+                    console.log(`Spider playing first animation "${animations[0].name}"`);
+                }
+
+                // Setup attack animation if available
+                if (attackClip) {
+                    spiderAttackAction = spiderMixer.clipAction(attackClip);
+                    spiderAttackAction.setLoop(THREE.LoopOnce, 1);
+                    spiderAttackAction.clampWhenFinished = true;
+                    console.log(`Spider attack animation "${attackClip.name}" ready`);
+                } else {
+                    console.log('No attack animation found for spider, will use first animation');
+                    // Use first animation as attack if no specific attack animation
+                    if (animations.length > 0) {
+                        spiderAttackAction = spiderMixer.clipAction(animations[0]);
+                        spiderAttackAction.setLoop(THREE.LoopOnce, 1);
+                        spiderAttackAction.clampWhenFinished = true;
+                    }
+                }
+            }
+
+            scene.add(model);
+            spiders.push({
+                model: model,
+                mixer: spiderMixer,
+                walkAction: spiderWalkAction,
+                attackAction: spiderAttackAction,
+                isChasing: false,
+                moveSpeed: SPIDER_WANDER_SPEED,
+                isAttacking: false,
+                isJumpingBack: false,
+                jumpBackStartTime: 0,
+                jumpBackDuration: SPIDER_JUMP_BACK_DURATION,
+                jumpBackStartPos: null,
+                jumpBackEndPos: null
+            });
+
+        } catch (err) {
+            console.warn(`Failed to load spider model:`, err);
+        }
+    }
+
+    console.log(`Spawned ${spiders.length} spiders on the map`);
+}
+
+function triggerSpiderAttack(spider: SpiderInstance) {
+    if (spider.isAttacking || spider.isJumpingBack || !spider.attackAction || !spider.mixer) {
+        return;
+    }
+
+    spider.isAttacking = true;
+
+    // Stop walk animation and play attack
+    if (spider.walkAction && spider.walkAction.isRunning()) {
+        spider.walkAction.stop();
+    }
+
+    spider.attackAction.reset().play();
+    console.log('Spider attacking!');
+
+    // Setup event listener for when attack animation finishes
+    const onAttackFinished = (e: any) => {
+        if (e.action === spider.attackAction) {
+            spider.attackAction!.stop();
+            spider.isAttacking = false;
+
+            // Start jump back
+            if (playerModel) {
+                const spiderPos = spider.model.position;
+                const playerPos = playerModel.position;
+
+                // Calculate direction away from player
+                const direction = new THREE.Vector3().subVectors(spiderPos, playerPos);
+                direction.y = 0;
+                direction.normalize();
+
+                spider.jumpBackStartPos = spiderPos.clone();
+                spider.jumpBackEndPos = spiderPos.clone().addScaledVector(direction, SPIDER_JUMP_BACK_DISTANCE);
+                spider.jumpBackStartTime = clock.getElapsedTime();
+                spider.isJumpingBack = true;
+            }
+
+            // Remove this specific listener
+            spider.mixer!.removeEventListener('finished', onAttackFinished);
+        }
+    };
+    spider.mixer.addEventListener('finished', onAttackFinished);
+}
+
+function updateSpiderJumpBack(spider: SpiderInstance) {
+    if (!spider.isJumpingBack || !spider.jumpBackStartPos || !spider.jumpBackEndPos) {
+        return;
+    }
+
+    const currentTime = clock.getElapsedTime();
+    const elapsed = currentTime - spider.jumpBackStartTime;
+    const progress = Math.min(elapsed / spider.jumpBackDuration, 1);
+
+    // Ease-out interpolation for smooth jump back
+    const easeProgress = 1 - Math.pow(1 - progress, 3);
+
+    // Interpolate position
+    const currentPos = spider.jumpBackStartPos.clone().lerp(spider.jumpBackEndPos, easeProgress);
+
+    // Check ground height at current position
+    const groundCheckOrigin = currentPos.clone();
+    groundCheckOrigin.y += 10;
+    const downVector = new THREE.Vector3(0, -1, 0);
+
+    raycaster.set(groundCheckOrigin, downVector);
+    const groundIntersects = raycaster.intersectObjects(worldObjects, true);
+
+    if (groundIntersects.length > 0) {
+        const groundY = groundIntersects[0].point.y;
+        spider.model.position.x = currentPos.x;
+        spider.model.position.z = currentPos.z;
+        spider.model.position.y = groundY;
+    }
+
+    // Jump back complete
+    if (progress >= 1) {
+        spider.isJumpingBack = false;
+        spider.jumpBackStartPos = null;
+        spider.jumpBackEndPos = null;
+
+        // Resume walk animation
+        if (spider.walkAction) {
+            spider.walkAction.reset().play();
+        }
+    }
+}
+
 function loadAudio() {
     if (!playerModel) return;
 
@@ -756,45 +1029,6 @@ function updateSplashes(delta: number) {
 }
 
 
-/**
- * Triggers the death animation for an animal, then returns to idle/eating animation
- */
-function playAnimalDeathAnimation(animalModel: THREE.Group) {
-    const animalInstance = animalInstances.find(instance => instance.model === animalModel);
-
-    if (!animalInstance || !animalInstance.deathAction || !animalInstance.action) {
-        return; // No death animation available
-    }
-
-    if (animalInstance.isPlayingDeath) {
-        return; // Already playing death animation
-    }
-
-    // Stop current animation and play death
-    if (animalInstance.action.isRunning()) {
-        animalInstance.action.stop();
-    }
-
-    animalInstance.deathAction.reset().play();
-    animalInstance.isPlayingDeath = true;
-
-    // Setup event listener for when death animation finishes
-    if (animalInstance.mixer) {
-        const onFinished = (e: any) => {
-            if (e.action === animalInstance.deathAction) {
-                // Death animation finished, return to idle/eating
-                animalInstance.deathAction!.stop();
-                animalInstance.action!.reset().play();
-                animalInstance.isPlayingDeath = false;
-
-                // Remove this specific listener
-                animalInstance.mixer!.removeEventListener('finished', onFinished);
-            }
-        };
-        animalInstance.mixer.addEventListener('finished', onFinished);
-    }
-}
-
 function changeAnimalAnimation(animalInstance: AnimalInstance) {
     if (!animalInstance.mixer || animalInstance.isPlayingDeath) {
         return;
@@ -970,6 +1204,210 @@ function updateAnimalMovement(animalInstance: AnimalInstance) {
     }
 }
 
+function updateSpiderAI(spider: SpiderInstance) {
+    if (!playerModel) return;
+
+    // Don't update AI if spider is attacking or jumping back
+    if (spider.isAttacking || spider.isJumpingBack) {
+        return;
+    }
+
+    const spiderPos = spider.model.position;
+    const playerPos = playerModel.position;
+    const distanceToPlayer = spiderPos.distanceTo(playerPos);
+
+    // Check if player is in detection range
+    if (distanceToPlayer < SPIDER_DETECTION_RANGE) {
+        spider.isChasing = true;
+        spider.moveSpeed = SPIDER_CHASE_SPEED;
+
+        // Calculate direction to player
+        const direction = new THREE.Vector3().subVectors(playerPos, spiderPos);
+        direction.y = 0; // Keep movement horizontal
+        direction.normalize();
+
+        // Rotate spider to face player
+        spider.model.rotation.y = Math.atan2(direction.x, direction.z);
+
+        // Check current distance to player
+        const currentDistanceToPlayer = spiderPos.distanceTo(playerPos);
+        const attackTriggerDistance = COLLISION_RADIUS + SPIDER_COLLISION_RADIUS + 0.2; // Slightly larger to trigger before collision
+
+        // If within attack range, trigger attack
+        if (currentDistanceToPlayer <= attackTriggerDistance) {
+            // Spider is close enough to attack - trigger it
+            if (!spider.isAttacking && !spider.isJumpingBack && playerModel && !controlsLocked) {
+                // Make player fall
+                if (runAction && runAction.isRunning()) runAction.stop();
+                if (walkAction && walkAction.isRunning()) walkAction.stop();
+                if (jumpAction && jumpAction.isRunning()) jumpAction.stop();
+
+                // Stop all movement sounds
+                if (runningSound && runningSound.isPlaying) runningSound.stop();
+                if (waterSound && waterSound.isPlaying) waterSound.stop();
+
+                // Play fall animation
+                if (fallAction) {
+                    fallAction.reset().play();
+                }
+
+                // Lock controls temporarily
+                controlsLocked = true;
+                setTimeout(() => {
+                    controlsLocked = false;
+                }, 1000);
+
+                // Trigger spider attack animation and jump back
+                triggerSpiderAttack(spider);
+
+                // Play hit sound
+                if (animalHitSound && !animalHitSound.isPlaying) {
+                    animalHitSound.play();
+                }
+            }
+        } else {
+            // Move towards player if not in attack range
+            const moveVector = direction.multiplyScalar(spider.moveSpeed);
+            const newPosition = spiderPos.clone().add(moveVector);
+
+            // Check ground height at new position
+            const groundCheckOrigin = newPosition.clone();
+            groundCheckOrigin.y += 10;
+            const downVector = new THREE.Vector3(0, -1, 0);
+
+            raycaster.set(groundCheckOrigin, downVector);
+            const groundIntersects = raycaster.intersectObjects(worldObjects, true);
+
+            if (groundIntersects.length > 0) {
+                const groundY = groundIntersects[0].point.y;
+
+                // Check terrain safety
+                const normal = groundIntersects[0].face?.normal;
+                let isSafe = true;
+
+                if (normal) {
+                    const worldNormal = normal.clone().applyMatrix3(
+                        new THREE.Matrix3().getNormalMatrix(groundIntersects[0].object.matrixWorld)
+                    ).normalize();
+                    const slopeDot = worldNormal.dot(new THREE.Vector3(0, 1, 0));
+                    isSafe = slopeDot > 0.6;
+                }
+
+                const isWater = groundY < 0.5;
+                if (isWater) {
+                    isSafe = false;
+                }
+
+                if (isSafe) {
+                    spider.model.position.x = newPosition.x;
+                    spider.model.position.z = newPosition.z;
+                    spider.model.position.y = groundY;
+                }
+            }
+        }
+    } else {
+        // Wander behavior when player is far
+        spider.isChasing = false;
+        spider.moveSpeed = SPIDER_WANDER_SPEED;
+
+        // Get forward direction
+        const forward = new THREE.Vector3(0, 0, 1);
+        forward.applyQuaternion(spider.model.quaternion);
+
+        // Randomly change direction occasionally
+        if (Math.random() < 0.02) { // 2% chance per frame
+            spider.model.rotation.y += (Math.random() - 0.5) * Math.PI / 2;
+        }
+
+        // Check for obstacles ahead
+        const rayOrigin = spiderPos.clone();
+        rayOrigin.y += 1;
+
+        raycaster.set(rayOrigin, forward);
+        raycaster.far = 2.0;
+        const intersects = raycaster.intersectObjects(worldObjects, true);
+        raycaster.far = Infinity;
+
+        let hasObstacle = false;
+        if (intersects.length > 0 && intersects[0].distance < 2.0) {
+            hasObstacle = true;
+        }
+
+        if (hasObstacle) {
+            // Turn away from obstacle
+            spider.model.rotation.y += Math.PI / 4;
+        } else {
+            // Move forward
+            const moveVector = forward.multiplyScalar(spider.moveSpeed);
+            const newPosition = spiderPos.clone().add(moveVector);
+
+            // Check if we'd collide with player or other spiders
+            let wouldCollide = false;
+
+            // Check player collision
+            if (playerModel) {
+                const distToPlayer = newPosition.distanceTo(playerModel.position);
+                if (distToPlayer < (COLLISION_RADIUS + SPIDER_COLLISION_RADIUS + 0.5)) {
+                    wouldCollide = true;
+                }
+            }
+
+            // Check other spiders
+            if (!wouldCollide) {
+                for (const otherSpider of spiders) {
+                    if (otherSpider === spider) continue;
+                    const distToOtherSpider = newPosition.distanceTo(otherSpider.model.position);
+                    if (distToOtherSpider < (SPIDER_COLLISION_RADIUS * 2 + 0.5)) {
+                        wouldCollide = true;
+                        break;
+                    }
+                }
+            }
+
+            if (wouldCollide) {
+                // Turn to avoid collision
+                spider.model.rotation.y += Math.PI / 4;
+            } else {
+                // Check ground height
+                const groundCheckOrigin = newPosition.clone();
+                groundCheckOrigin.y += 10;
+                const downVector = new THREE.Vector3(0, -1, 0);
+
+                raycaster.set(groundCheckOrigin, downVector);
+                const groundIntersects = raycaster.intersectObjects(worldObjects, true);
+
+                if (groundIntersects.length > 0) {
+                    const groundY = groundIntersects[0].point.y;
+
+                    const normal = groundIntersects[0].face?.normal;
+                    let isSafe = true;
+
+                    if (normal) {
+                        const worldNormal = normal.clone().applyMatrix3(
+                            new THREE.Matrix3().getNormalMatrix(groundIntersects[0].object.matrixWorld)
+                        ).normalize();
+                        const slopeDot = worldNormal.dot(new THREE.Vector3(0, 1, 0));
+                        isSafe = slopeDot > 0.6;
+                    }
+
+                    const isWater = groundY < 0.5;
+                    if (isWater) {
+                        isSafe = false;
+                    }
+
+                    if (isSafe) {
+                        spider.model.position.x = newPosition.x;
+                        spider.model.position.z = newPosition.z;
+                        spider.model.position.y = groundY;
+                    } else {
+                        spider.model.rotation.y += Math.PI / 3;
+                    }
+                }
+            }
+        }
+    }
+}
+
 function handlePlayerMovement() {
     if (!playerModel) return;
 
@@ -1050,7 +1488,6 @@ function handlePlayerMovement() {
         }
 
         let hitAnimal = false;
-        let collidedAnimal: THREE.Group | null = null;
         const animalCollisionRadius = 0.8;
         const combinedRadius = COLLISION_RADIUS + animalCollisionRadius;
 
@@ -1058,12 +1495,25 @@ function handlePlayerMovement() {
             const futureDistance = targetPosition.distanceTo(animal.position);
             if (futureDistance < combinedRadius) {
                 hitAnimal = true;
-                collidedAnimal = animal;
                 break;
             }
         }
 
-        if (heightDifference > MAX_STEP_HEIGHT || hitWall || hitAnimal) {
+        // Check collision with spiders
+        let hitSpider = false;
+        let collidedSpider: SpiderInstance | null = null;
+        const spiderCombinedRadius = COLLISION_RADIUS + SPIDER_COLLISION_RADIUS;
+
+        for (const spider of spiders) {
+            const futureDistance = targetPosition.distanceTo(spider.model.position);
+            if (futureDistance < spiderCombinedRadius) {
+                hitSpider = true;
+                collidedSpider = spider;
+                break;
+            }
+        }
+
+        if (heightDifference > MAX_STEP_HEIGHT || hitWall || hitAnimal || hitSpider) {
             const failedMovementVector = targetPosition
                 .clone()
                 .sub(originalPosition);
@@ -1073,40 +1523,51 @@ function handlePlayerMovement() {
                 .copy(failedMovementVector)
                 .negate()
                 .normalize()
-                .multiplyScalar(hitAnimal ? 1 : 0);
+                .multiplyScalar(0);
 
             targetPosition.x = originalPosition.x + tempBumpVector.x;
             targetPosition.z = originalPosition.z + tempBumpVector.z;
 
             moving = false;
 
-            // Only trigger fall animation and controls lock when hitting an animal
-            if (hitAnimal) {
-                if (runAction) runAction.stop();
-                if (walkAction) walkAction.stop();
+            // Handle spider collision - player falls
+            if (hitSpider) {
+                // Stop all player actions
+                if (runAction && runAction.isRunning()) runAction.stop();
+                if (walkAction && walkAction.isRunning()) walkAction.stop();
+                if (jumpAction && jumpAction.isRunning()) jumpAction.stop();
 
+                // Stop all movement sounds
+                if (runningSound && runningSound.isPlaying) runningSound.stop();
+                if (waterSound && waterSound.isPlaying) waterSound.stop();
+
+                // Play fall animation
                 if (fallAction) {
                     fallAction.reset().play();
-
-                    controlsLocked = true;
-                    setTimeout(() => {
-                        controlsLocked = false;
-                    }, 1000);
-
-                    if (runningSound && runningSound.isPlaying) runningSound.stop();
-                    if (waterSound && waterSound.isPlaying) waterSound.stop();
                 }
 
-                // Trigger animal death animation
-                if (collidedAnimal) {
-                    playAnimalDeathAnimation(collidedAnimal);
+                // Lock controls temporarily
+                controlsLocked = true;
+                setTimeout(() => {
+                    controlsLocked = false;
+                }, 1000);
 
-                    // Play animal hit sound
-                    if (animalHitSound && !animalHitSound.isPlaying) {
-                        animalHitSound.play();
-                    }
+                // Trigger spider attack animation and jump back
+                if (collidedSpider) {
+                    triggerSpiderAttack(collidedSpider);
                 }
-            } else {
+
+                // Play hit sound
+                if (animalHitSound && !animalHitSound.isPlaying) {
+                    animalHitSound.play();
+                }
+            }
+            // Handle animal collision - just block movement, no animation or sound
+            else if (hitAnimal) {
+                // Animals just act as obstacles, no special effects
+            }
+            // Handle wall/obstacle collision
+            else {
                 // For walls/obstacles, play bump sound only once per collision
                 if (bumpSound && !bumpSoundPlayed) {
                     bumpSound.play();
@@ -1121,6 +1582,7 @@ function handlePlayerMovement() {
 
     playerModel.position.x = targetPosition.x;
     playerModel.position.z = targetPosition.z;
+
 
     const finalOrigin = playerModel.position.clone();
     finalOrigin.y += playerHeight;
@@ -1422,8 +1884,8 @@ function incrementLoadingProgress(stepName: string) {
 setupFpsCounter();
 setupLoadingBar();
 
-// Initialize loading with total steps: sun (1) + clouds (1) + player (2 steps) + world (2 steps) + 20 animals
-initializeLoading(1 + 1 + 2 + 2 + 20);
+// Initialize loading with total steps: sun (1) + clouds (1) + player (2 steps) + world (2 steps) + 20 animals + 5 spiders
+initializeLoading(1 + 1 + 2 + 2 + 20 + 5);
 
 createSun().then(() => {
     return createClouds();
@@ -1433,6 +1895,8 @@ createSun().then(() => {
     return createWorld();
 }).then(() => {
     return spawnAnimals(20);
+}).then(() => {
+    return spawnSpiders(5);
 });
 
 function animate() {
@@ -1473,6 +1937,15 @@ function animate() {
 
             // Update animal movement
             updateAnimalMovement(animalInstance);
+        }
+
+        // Update spiders
+        for (const spider of spiders) {
+            if (spider.mixer) {
+                spider.mixer.update(delta);
+            }
+            updateSpiderAI(spider);
+            updateSpiderJumpBack(spider);
         }
 
         handlePlayerMovement();
