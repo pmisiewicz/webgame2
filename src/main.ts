@@ -73,6 +73,8 @@ const rotationSpeed = 0.035;
 const MAX_STEP_HEIGHT = 1;
 const BUMP_DISTANCE = 2;
 const WATER_SINK_DEPTH = -0.4;
+let playerHeight = 1;
+const COLLISION_RADIUS = 0.8;
 const keys: { [key: string]: boolean } = {};
 let controlsLocked: boolean = false;
 
@@ -340,6 +342,11 @@ async function createPlayer() {
         playerModel.scale.setScalar(0.5);
         playerModel.position.set(5, 7, 8);
 
+        const bbox = new THREE.Box3().setFromObject(playerModel);
+        const modelHeight = bbox.max.y - bbox.min.y;
+        playerHeight = modelHeight * 0.9; // Use 90% of model height for raycasting
+        console.log(`Player model height: ${modelHeight.toFixed(2)}`);
+
         scene.add(playerModel);
 
         if (animations && animations.length > 0) {
@@ -496,7 +503,7 @@ function handlePlayerMovement() {
 
     if (moving) {
         const currentOrigin = originalPosition.clone();
-        currentOrigin.y += 20;
+        currentOrigin.y += playerHeight;
         raycaster.set(currentOrigin, down);
         const currentIntersects = raycaster.intersectObjects(
             worldObjects,
@@ -510,7 +517,7 @@ function handlePlayerMovement() {
         }
 
         const nextOrigin = targetPosition.clone();
-        nextOrigin.y = originalPosition.y + 20;
+        nextOrigin.y = originalPosition.y + playerHeight;
 
         raycaster.set(nextOrigin, down);
         const nextIntersects = raycaster.intersectObjects(worldObjects, true);
@@ -522,7 +529,25 @@ function handlePlayerMovement() {
 
         const heightDifference = nextGroundHeight - currentGroundHeight;
 
-        if (heightDifference > MAX_STEP_HEIGHT) {
+        // Horizontal collision detection - check for walls/obstacles at player level
+        const movementDirection = new THREE.Vector3().subVectors(targetPosition, originalPosition).normalize();
+        const horizontalOrigin = originalPosition.clone();
+        horizontalOrigin.y += playerHeight / 2;
+
+        raycaster.set(horizontalOrigin, movementDirection);
+        raycaster.far = COLLISION_RADIUS;
+        const horizontalIntersects = raycaster.intersectObjects(worldObjects, true);
+        raycaster.far = Infinity;
+
+        let hitWall = false;
+        if (horizontalIntersects.length > 0) {
+            const hitDistance = horizontalIntersects[0].distance;
+            if (hitDistance < COLLISION_RADIUS) {
+                hitWall = true;
+            }
+        }
+
+        if (heightDifference > MAX_STEP_HEIGHT || hitWall) {
             const failedMovementVector = targetPosition
                 .clone()
                 .sub(originalPosition);
@@ -564,7 +589,7 @@ function handlePlayerMovement() {
     playerModel.position.z = targetPosition.z;
 
     const finalOrigin = playerModel.position.clone();
-    finalOrigin.y += 20;
+    finalOrigin.y += playerHeight;
 
     raycaster.set(finalOrigin, down);
 
@@ -726,6 +751,7 @@ function updateCameraPosition(instant: boolean = false) {
 }
 
 window.addEventListener("keydown", (event) => {
+
     // Ignore movement keys if controls are locked, but allow rotation
     if (
         controlsLocked &&
