@@ -119,7 +119,14 @@ let mixer: THREE.AnimationMixer | null = null;
 let runAction: THREE.AnimationAction | null = null;
 let walkAction: THREE.AnimationAction | null = null;
 let fallAction: THREE.AnimationAction | null = null;
+let jumpAction: THREE.AnimationAction | null = null;
 const clock = new THREE.Clock();
+
+let isJumping = false;
+let jumpVelocity = 0;
+let jumpAnimationPlayed = false;
+const JUMP_FORCE = 10;
+const JUMP_GRAVITY = -25;
 
 const FPS_LIMIT = 60;
 const interval = 1000 / FPS_LIMIT;
@@ -593,6 +600,9 @@ async function createPlayer() {
             const fallClip = animations.find(
                 (clip) => clip.name === "CharacterArmature|Death",
             );
+            const jumpClip = animations.find(
+                (clip) => clip.name === "CharacterArmature|Jump",
+            );
 
             if (runClip) {
                 runAction = mixer.clipAction(runClip);
@@ -625,10 +635,24 @@ async function createPlayer() {
                 );
             }
 
+            if (jumpClip) {
+                jumpAction = mixer.clipAction(jumpClip);
+                jumpAction.setLoop(THREE.LoopOnce, 1);
+                jumpAction.clampWhenFinished = true;
+            } else {
+                console.warn(
+                    "Nie znaleziono klipu animacji 'jump'. Dostępne klipy:",
+                    animations.map((c) => c.name),
+                );
+            }
+
             if (mixer) {
                 mixer.addEventListener("finished", (e) => {
                     if (fallAction && e.action === fallAction) {
                         fallAction.stop();
+                    }
+                    if (jumpAction && e.action === jumpAction) {
+                        jumpAction.stop();
                     }
                 });
             }
@@ -915,7 +939,26 @@ function handlePlayerMovement() {
 
         const playerHeightOffset = isWater ? WATER_SINK_DEPTH : 0;
 
-        playerModel.position.y = groundHeight + playerHeightOffset;
+        // Handle jumping physics
+        if (isJumping) {
+            jumpVelocity += JUMP_GRAVITY * 0.016; // Apply gravity (assuming ~60fps)
+            playerModel.position.y += jumpVelocity * 0.016;
+
+            // Check if landed on ground
+            if (playerModel.position.y <= groundHeight + playerHeightOffset) {
+                playerModel.position.y = groundHeight + playerHeightOffset;
+                isJumping = false;
+                jumpVelocity = 0;
+                jumpAnimationPlayed = false;
+
+                // Stop jump animation when landing
+                if (jumpAction && jumpAction.isRunning()) {
+                    jumpAction.stop();
+                }
+            }
+        } else {
+            playerModel.position.y = groundHeight + playerHeightOffset;
+        }
     } else {
         if (playerModel.position.y > 0) {
             playerModel.position.y -= 0.1;
@@ -942,7 +985,23 @@ function handlePlayerMovement() {
 
     if (runAction && walkAction) {
         if (!controlsLocked) {
-            if (isRunning) {
+            if (isJumping) {
+                // While jumping, play jump animation only once
+                if (jumpAction && !jumpAnimationPlayed) {
+                    if (runAction.isRunning()) runAction.stop();
+                    if (walkAction.isRunning()) walkAction.stop();
+                    jumpAction.reset().play();
+                    jumpAnimationPlayed = true;
+                }
+
+                // Stop movement sounds while jumping
+                if (runningSound && runningSound.isPlaying) {
+                    runningSound.stop();
+                }
+                if (waterSound && waterSound.isPlaying) {
+                    waterSound.stop();
+                }
+            } else if (isRunning) {
                 if (isWater) {
                     moveSpeed = WALK_SPEED;
 
@@ -993,7 +1052,21 @@ function handlePlayerMovement() {
         }
     } else {
         if (!controlsLocked) {
-            if (isRunning) {
+            if (isJumping) {
+                // While jumping, play jump animation only once
+                if (jumpAction && !jumpAnimationPlayed) {
+                    jumpAction.reset().play();
+                    jumpAnimationPlayed = true;
+                }
+
+                // Stop movement sounds while jumping
+                if (runningSound && runningSound.isPlaying) {
+                    runningSound.stop();
+                }
+                if (waterSound && waterSound.isPlaying) {
+                    waterSound.stop();
+                }
+            } else if (isRunning) {
                 if (isWater) {
                     moveSpeed = WALK_SPEED;
                     if (waterSound && !waterSound.isPlaying) {
@@ -1062,6 +1135,13 @@ window.addEventListener("keydown", (event) => {
     ) {
         return;
     }
+
+    // Handle jump
+    if ((event.key === " " || event.key === "Spacebar") && !isJumping && !controlsLocked) {
+        isJumping = true;
+        jumpVelocity = JUMP_FORCE;
+    }
+
     keys[event.key] = true;
 });
 
