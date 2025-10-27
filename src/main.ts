@@ -126,7 +126,9 @@ let isJumping = false;
 let jumpVelocity = 0;
 let jumpAnimationPlayed = false;
 const JUMP_FORCE = 10;
-const JUMP_GRAVITY = -20;
+const JUMP_GRAVITY = -30;
+const MAX_JUMPS = 2;
+let jumpsRemaining = MAX_JUMPS;
 
 const FPS_LIMIT = 60;
 const interval = 1000 / FPS_LIMIT;
@@ -956,6 +958,7 @@ function handlePlayerMovement() {
                 isJumping = false;
                 jumpVelocity = 0;
                 jumpAnimationPlayed = false;
+                jumpsRemaining = MAX_JUMPS;
 
                 // Stop jump animation when landing
                 if (jumpAction && jumpAction.isRunning()) {
@@ -964,6 +967,7 @@ function handlePlayerMovement() {
             }
         } else {
             playerModel.position.y = groundHeight + playerHeightOffset;
+            jumpsRemaining = MAX_JUMPS; // Reset double jump when on ground
         }
     } else {
         if (playerModel.position.y > 0) {
@@ -980,7 +984,7 @@ function handlePlayerMovement() {
 
     let isRunning = moving;
 
-    if (isRunning && isWater) {
+    if (isRunning && isWater && !isJumping) {
         if (clock.getElapsedTime() > lastSplashTime + SPLASH_EMISSION_RATE) {
             if (playerModel) {
                 spawnSplash(playerModel.position);
@@ -1143,9 +1147,10 @@ window.addEventListener("keydown", (event) => {
     }
 
     // Handle jump
-    if ((event.key === " " || event.key === "Spacebar") && !isJumping && !controlsLocked) {
+    if ((event.key === " " || event.key === "Spacebar") && jumpsRemaining > 0 && !controlsLocked) {
         isJumping = true;
         jumpVelocity = JUMP_FORCE;
+        jumpsRemaining--;
     }
 
     keys[event.key] = true;
