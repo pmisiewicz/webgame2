@@ -271,6 +271,8 @@ function isMesh(child: THREE.Object3D): child is THREE.Mesh {
 async function createWorld() {
     try {
         const {model} = await loadModel("Nature.glb");
+        incrementLoadingProgress('Loading World...');
+
         model.scale.setScalar(50);
         model.position.set(0, 10, 0);
 
@@ -291,8 +293,10 @@ async function createWorld() {
         });
 
         scene.add(model);
+        incrementLoadingProgress('World Loaded');
     } catch (err) {
         console.warn("Błąd ładowania modelu Nature.glb:", err);
+        incrementLoadingProgress('World Load Failed');
     }
 }
 
@@ -306,6 +310,11 @@ async function spawnAnimals(count: number) {
 
         try {
             const {model, animations} = await loadModel(randomAnimalModel);
+
+            // Update loading progress every 5 animals
+            if (i % 5 === 0 || i === count - 1) {
+                incrementLoadingProgress(`Loading Animals... (${i + 1}/${count})`);
+            }
 
             // Random scale variation for each animal
             const scaleFactor = 0.4 + Math.random() * 0.3; // 0.4 to 0.7
@@ -497,6 +506,7 @@ function loadAudio() {
 
 async function createPlayer() {
     try {
+        incrementLoadingProgress('Loading Player...');
         const {model, animations} = await loadModel("Animated Platformer Character.glb");
         playerModel = model;
 
@@ -567,9 +577,11 @@ async function createPlayer() {
             console.warn("Model 'Animated Platformer Character.glb' nie zawiera animacji.");
         }
 
+        incrementLoadingProgress('Player Loaded');
         updateCameraPosition(true);
     } catch (err) {
         console.warn("Błąd ładowania modelu 'Animated Platformer Character.glb':", err);
+        incrementLoadingProgress('Player Load Failed');
     }
 }
 
@@ -947,36 +959,72 @@ window.addEventListener("keyup", (event) => {
 });
 
 function setupFpsCounter() {
-    const style = document.createElement('style');
-    style.textContent = `
-        #fps-counter {
-            position: fixed;
-            top: 10px;
-            left: 10px;
-            background: rgba(0, 0, 0, 0.7);
-            color: #00ff00;
-            padding: 5px 10px;
-            font-family: monospace;
-            font-size: 14px;
-            z-index: 1000;
-            border-radius: 4px;
-        }
-    `;
-    document.head.appendChild(style);
-
     fpsElement = document.createElement('div');
     fpsElement.id = 'fps-counter';
     fpsElement.textContent = 'FPS: --';
     document.body.appendChild(fpsElement);
 }
 
+function setupLoadingBar() {
+    const container = document.createElement('div');
+    container.id = 'loading-container';
+    container.innerHTML = `
+        <div id="loading-text">Loading Game Assets...</div>
+        <div id="loading-bar-bg">
+            <div id="loading-bar-fill"></div>
+        </div>
+        <div id="loading-percentage">0%</div>
+    `;
+    document.body.appendChild(container);
+}
+
+function updateLoadingBar(progress: number, text: string = 'Loading Game Assets...') {
+    const container = document.getElementById('loading-container');
+    const fill = document.getElementById('loading-bar-fill');
+    const percentage = document.getElementById('loading-percentage');
+    const loadingText = document.getElementById('loading-text');
+
+    if (fill) fill.style.width = `${progress}%`;
+    if (percentage) percentage.textContent = `${Math.round(progress)}%`;
+    if (loadingText) loadingText.textContent = text;
+
+    if (progress >= 100 && container) {
+        setTimeout(() => {
+            container.classList.add('hidden');
+            setTimeout(() => {
+                container.remove();
+            }, 500);
+        }, 300);
+    }
+}
+
+let totalLoadingSteps = 0;
+let completedLoadingSteps = 0;
+
+function initializeLoading(steps: number) {
+    totalLoadingSteps = steps;
+    completedLoadingSteps = 0;
+    updateLoadingBar(0, 'Loading Game Assets...');
+}
+
+function incrementLoadingProgress(stepName: string) {
+    completedLoadingSteps++;
+    const progress = (completedLoadingSteps / totalLoadingSteps) * 100;
+    updateLoadingBar(progress, stepName);
+}
+
 createSun();
 createClouds();
-createPlayer();
 setupFpsCounter();
+setupLoadingBar();
 
-createWorld().then(() => {
-    spawnAnimals(25);
+// Initialize loading with total steps: player (2 steps) + world (2 steps) + animals (6 steps for 25 animals, updating every 5)
+initializeLoading(10);
+
+createPlayer().then(() => {
+    return createWorld();
+}).then(() => {
+    return spawnAnimals(25);
 });
 
 function animate() {
