@@ -4,9 +4,9 @@ import { MeshBVH, acceleratedRaycast } from "three-mesh-bvh";
 
 // FIX: Import audio assets directly to ensure the build system handles their
 // public path and correct MIME type in the preview/production build.
-import runningSoundUrl from "/public/running-on-the-floor-359909.mp3";
-import waterSoundUrl from "/public/walking-in-water-199418.mp3";
-import bumpSoundUrl from "/public/manbonk-357114.mp3";
+import runningSoundUrl from "/src/sfx/running-on-the-floor-359909.mp3";
+import waterSoundUrl from "/src/sfx/walking-in-water-199418.mp3";
+import bumpSoundUrl from "/src/sfx/manbonk-357114.mp3";
 
 const scene = new THREE.Scene();
 const skyColor = 0x87ceeb; // Define a variable for the sky color
@@ -127,7 +127,7 @@ async function loadModel(
 ): Promise<{ model: THREE.Group; animations: THREE.AnimationClip[] }> {
     return new Promise((resolve, reject) => {
         loader.load(
-            `/models/${name}`,
+            `/src/models/${name}`,
             (gltf: GLTF) => {
                 const model = gltf.scene;
                 model.traverse((child: THREE.Object3D) => {
