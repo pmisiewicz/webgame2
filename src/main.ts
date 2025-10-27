@@ -1,15 +1,13 @@
 import * as THREE from "three";
-import { GLTFLoader, type GLTF } from "three/addons/loaders/GLTFLoader.js";
-import { MeshBVH, acceleratedRaycast } from "three-mesh-bvh";
+import {type GLTF, GLTFLoader} from "three/addons/loaders/GLTFLoader.js";
+import {acceleratedRaycast, MeshBVH} from "three-mesh-bvh";
 
-// FIX: Import audio assets directly to ensure the build system handles their
-// public path and correct MIME type in the preview/production build.
 import runningSoundUrl from "/src/sfx/running-on-the-floor-359909.mp3";
 import waterSoundUrl from "/src/sfx/walking-in-water-199418.mp3";
 import bumpSoundUrl from "/src/sfx/manbonk-357114.mp3";
 
 const scene = new THREE.Scene();
-const skyColor = 0x87ceeb; // Define a variable for the sky color
+const skyColor = 0x87ceeb;
 scene.background = new THREE.Color(skyColor);
 
 const FOG_NEAR = 50;
@@ -22,13 +20,12 @@ const camera = new THREE.PerspectiveCamera(
     0.5,
     FOG_FAR,
 );
-
 const listener = new THREE.AudioListener();
 camera.add(listener);
 
 const audioLoader = new THREE.AudioLoader();
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+const renderer = new THREE.WebGLRenderer({antialias: true});
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -56,7 +53,7 @@ scene.add(dirLight.target);
 
 const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(1000, 1000),
-    new THREE.MeshStandardMaterial({ color: 0x47a24c }),
+    new THREE.MeshStandardMaterial({color: 0x47a24c}),
 );
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
@@ -73,7 +70,7 @@ const RUN_SPEED = 1.2;
 const WALK_SPEED = 0.6;
 let moveSpeed = RUN_SPEED;
 const rotationSpeed = 0.035;
-const MAX_STEP_HEIGHT = 0.66;
+const MAX_STEP_HEIGHT = 1;
 const BUMP_DISTANCE = 2;
 const WATER_SINK_DEPTH = -0.4;
 const keys: { [key: string]: boolean } = {};
@@ -96,20 +93,20 @@ const clock = new THREE.Clock();
 
 const FPS_LIMIT = 60;
 const interval = 1000 / FPS_LIMIT;
-let then = performance.now(); // Last time the frame was rendered
+let then = performance.now();
 
 let fpsElement: HTMLElement | null = null;
 let frameCount = 0;
 let lastTime = performance.now();
-const fpsInterval = 1000; // Update display every second (1000ms)
+const fpsInterval = 1000;
 
 const SPLASH_PARTICLE_COUNT = 16;
-const SPLASH_LIFESPAN = 1; // seconds
-const SPLASH_COLOR = 0x6FBFC9; // Water color (matches light water surface color)
-const SPLASH_EMISSION_RATE = 0.15; // Time in seconds between splash bursts
+const SPLASH_LIFESPAN = 1;
+const SPLASH_COLOR = 0x6FBFC9;
+const SPLASH_EMISSION_RATE = 0.15;
 let lastSplashTime = 0;
 
-const GRAVITY = -9.8 * 0.5; // Reduced gravity for effect
+const GRAVITY = -9.8 * 0.5;
 
 interface SplashParticle {
     mesh: THREE.Mesh;
@@ -117,10 +114,15 @@ interface SplashParticle {
     age: number;
     maxAge: number;
 }
+
 const particleData: SplashParticle[] = [];
-// Reusing a single geometry/material for all particles for efficiency
 const particleGeometry = new THREE.SphereGeometry(0.05, 4, 4);
-const particleMaterial = new THREE.MeshBasicMaterial({ color: SPLASH_COLOR, transparent: true, opacity: 1, depthWrite: false });
+const particleMaterial = new THREE.MeshBasicMaterial({
+    color: SPLASH_COLOR,
+    transparent: true,
+    opacity: 1,
+    depthWrite: false
+});
 
 async function loadModel(
     name: string,
@@ -137,7 +139,7 @@ async function loadModel(
                         mesh.receiveShadow = true;
                     }
                 });
-                resolve({ model, animations: gltf.animations });
+                resolve({model, animations: gltf.animations});
             },
             undefined,
             (err: unknown) => reject(err),
@@ -148,16 +150,14 @@ async function loadModel(
 function createSun() {
     const sunGroup = new THREE.Group();
 
-    // Main sun sphere - bright yellow/orange
     const sunGeometry = new THREE.SphereGeometry(8, 32, 32);
     const sunMaterial = new THREE.MeshBasicMaterial({
-        color: 0xfdb813, // Warm golden golden yellow
+        color: 0xfdb813,
         transparent: false,
     });
     const sun = new THREE.Mesh(sunGeometry, sunMaterial);
     sunGroup.add(sun);
 
-    // Inner glow layer
     const glowGeometry1 = new THREE.SphereGeometry(9.5, 32, 32);
     const glowMaterial1 = new THREE.MeshBasicMaterial({
         color: 0xffd700,
@@ -167,7 +167,6 @@ function createSun() {
     const glow1 = new THREE.Mesh(glowGeometry1, glowMaterial1);
     sunGroup.add(glow1);
 
-    // Outer glow layer
     const glowGeometry2 = new THREE.SphereGeometry(11, 32, 32);
     const glowMaterial2 = new THREE.MeshBasicMaterial({
         color: 0xffe4b5,
@@ -177,7 +176,6 @@ function createSun() {
     const glow2 = new THREE.Mesh(glowGeometry2, glowMaterial2);
     sunGroup.add(glow2);
 
-    // Outermost glow layer
     const glowGeometry3 = new THREE.SphereGeometry(13, 32, 32);
     const glowMaterial3 = new THREE.MeshBasicMaterial({
         color: 0xffffe0,
@@ -187,7 +185,6 @@ function createSun() {
     const glow3 = new THREE.Mesh(glowGeometry3, glowMaterial3);
     sunGroup.add(glow3);
 
-    // Position the sun in the sky
     sunGroup.position.set(50, 40, 100);
 
     scene.add(sunGroup);
@@ -223,14 +220,12 @@ function createCloud(): THREE.Group {
 
 function createClouds() {
     const cloudCount = 25;
-    const areaSize = 250; // Define the horizontal area for clouds
-    const altitude = 25; // Define the base altitude for clouds
+    const areaSize = 250;
+    const altitude = 25;
 
     for (let i = 0; i < cloudCount; i++) {
-        // Randomize horizontal position within the area
         const x = (Math.random() - 0.5) * areaSize;
         const z = (Math.random() - 0.5) * areaSize;
-        // Slightly vary the altitude
         const y = altitude + Math.random() * 20;
 
         const cloud = createCloud();
@@ -238,7 +233,6 @@ function createClouds() {
         const scaleFactor = Math.random() + 1;
         cloud.scale.setScalar(scaleFactor);
 
-        // Set the final position of the entire cloud group
         cloud.position.set(x, y, z);
 
         scene.add(cloud);
@@ -246,30 +240,26 @@ function createClouds() {
     }
 }
 
-// FIX: Improved type guard to correctly check for Mesh properties
 function isMesh(child: THREE.Object3D): child is THREE.Mesh {
     return (child as THREE.Mesh).isMesh && 'geometry' in child;
 }
 
 async function createWorld() {
     try {
-        const { model } = await loadModel("Nature.glb");
+        const {model} = await loadModel("Nature.glb");
         model.scale.setScalar(50);
         model.position.set(0, 10, 0);
 
         model.traverse((child) => {
-            // Check if the child is a Mesh and has a geometry property
             if (isMesh(child)) {
                 worldObjects.push(child);
 
-                // Use BufferGeometry to access computeVertexNormals
                 const geometry = child.geometry as THREE.BufferGeometry;
 
                 if (geometry.isBufferGeometry) {
-                    // Ensures the raycaster can return a 'face' and 'face.normal' - this fixes shadows!
+                    // Ensures the raycaster can return a 'face' and 'face.normal' - fixes shadows
                     geometry.computeVertexNormals();
 
-                    // Create and assign MeshBVH to the geometry (required for accelerated raycasting)
                     (geometry as any).boundsTree = new MeshBVH(geometry);
                     child.raycast = acceleratedRaycast;
                 }
@@ -285,10 +275,8 @@ async function createWorld() {
 function loadAudio() {
     if (!playerModel) return;
 
-    // Setup for Running Sound (Grass)
     runningSound = new THREE.PositionalAudio(listener);
     audioLoader.load(
-        // Use the imported URL
         runningSoundUrl,
         function (buffer) {
             if (runningSound) {
@@ -305,16 +293,14 @@ function loadAudio() {
     );
     playerModel.add(runningSound);
 
-    // Setup for Water Sound
     waterSound = new THREE.PositionalAudio(listener);
     audioLoader.load(
-        // Use the imported URL
         waterSoundUrl,
         function (buffer) {
             if (waterSound) {
                 waterSound.setBuffer(buffer);
                 waterSound.setLoop(true);
-                waterSound.setVolume(0.5); // Set volume
+                waterSound.setVolume(0.5);
                 waterSound.setRefDistance(10);
             }
         },
@@ -327,7 +313,6 @@ function loadAudio() {
 
     bumpSound = new THREE.PositionalAudio(listener);
     audioLoader.load(
-        // Use the imported URL
         bumpSoundUrl,
         function (buffer) {
             if (bumpSound) {
@@ -347,7 +332,7 @@ function loadAudio() {
 
 async function createPlayer() {
     try {
-        const { model, animations } = await loadModel("Animated Platformer Character.glb");
+        const {model, animations} = await loadModel("Animated Platformer Character.glb");
         playerModel = model;
 
         loadAudio();
@@ -404,7 +389,6 @@ async function createPlayer() {
             if (mixer) {
                 mixer.addEventListener("finished", (e) => {
                     if (fallAction && e.action === fallAction) {
-                        // Once the fall action is done, make it instantly stop holding the pose
                         fallAction.stop();
                     }
                 });
@@ -421,25 +405,19 @@ async function createPlayer() {
 
 /**
  * Creates and launches a burst of splash particles from the given position.
- * @param position The world position (usually the player's feet) to spawn the splash.
  */
 function spawnSplash(position: THREE.Vector3) {
     for (let i = 0; i < SPLASH_PARTICLE_COUNT; i++) {
-        // Must clone material for unique opacity handling
         const material = particleMaterial.clone();
         const mesh = new THREE.Mesh(particleGeometry, material);
 
-        // 1. Initial Position: player position + small random spread
         const initialPosition = position.clone();
-        initialPosition.y += 0.2; // Start just above water line
+        initialPosition.y += 0.2;
         initialPosition.x += (Math.random() - 0.5) * 0.5;
         initialPosition.z += (Math.random() - 0.5) * 0.5;
         mesh.position.copy(initialPosition);
 
-        // 2. Initial Velocity
-        // Random horizontal velocity (up to 0.5 units/sec)
         const velX = (Math.random() * 2 - 1) * 0.5;
-        // Upward initial velocity (1 to 2.5 units/sec)
         const velY = Math.random() * 1.5 + 1;
         const velZ = (Math.random() * 2 - 1) * 0.5;
         const velocity = new THREE.Vector3(velX, velY, velZ);
@@ -457,7 +435,6 @@ function spawnSplash(position: THREE.Vector3) {
 
 /**
  * Updates the position, scale, and opacity of all active splash particles.
- * @param delta Time elapsed since last frame.
  */
 function updateSplashes(delta: number) {
     for (let i = particleData.length - 1; i >= 0; i--) {
@@ -467,7 +444,6 @@ function updateSplashes(delta: number) {
 
         if (particle.age > particle.maxAge) {
             scene.remove(particle.mesh);
-            // Dispose of material to prevent memory leak
             if (particle.mesh.material instanceof THREE.Material) {
                 particle.mesh.material.dispose();
             }
@@ -475,11 +451,9 @@ function updateSplashes(delta: number) {
             continue;
         }
 
-        // Apply physics (gravity and update position)
         particle.velocity.y += GRAVITY * delta;
         particle.mesh.position.addScaledVector(particle.velocity, delta);
 
-        // Fade out and scale down based on life remaining
         const lifeRatio = 1 - (particle.age / particle.maxAge);
 
         (particle.mesh.material as THREE.MeshBasicMaterial).opacity = lifeRatio;
@@ -494,7 +468,6 @@ function handlePlayerMovement() {
     if (!playerModel) return;
 
     if (controlsLocked) {
-        // Still allow rotation, but block movement vectors
         if (keys["a"] || keys["A"] || keys["ArrowLeft"]) {
             playerModel.rotation.y += rotationSpeed;
         }
@@ -530,20 +503,19 @@ function handlePlayerMovement() {
             true,
         );
 
-        let currentGroundHeight = originalPosition.y - 1; // Default min height if raycast fails
+        let currentGroundHeight = originalPosition.y - 1;
         if (currentIntersects.length > 0) {
             currentGroundHeight =
                 currentOrigin.y - currentIntersects[0].distance;
         }
 
-        // Check potential position (X and Z from targetPosition, but Y high)
         const nextOrigin = targetPosition.clone();
-        nextOrigin.y = originalPosition.y + 20; // Set high for raycast
+        nextOrigin.y = originalPosition.y + 20;
 
         raycaster.set(nextOrigin, down);
         const nextIntersects = raycaster.intersectObjects(worldObjects, true);
 
-        let nextGroundHeight = currentGroundHeight; // If no terrain, assume current height
+        let nextGroundHeight = currentGroundHeight;
         if (nextIntersects.length > 0) {
             nextGroundHeight = nextOrigin.y - nextIntersects[0].distance;
         }
@@ -551,56 +523,46 @@ function handlePlayerMovement() {
         const heightDifference = nextGroundHeight - currentGroundHeight;
 
         if (heightDifference > MAX_STEP_HEIGHT) {
-            // 1. Calculate the failed movement vector (target - original)
             const failedMovementVector = targetPosition
                 .clone()
                 .sub(originalPosition);
 
-            // 2. Calculate the bump vector (reversed, normalized, and scaled)
+            // Bump player back in opposite direction
             tempBumpVector
                 .copy(failedMovementVector)
                 .negate()
                 .normalize()
-                .multiplyScalar(BUMP_DISTANCE); // Use the defined BUMP_DISTANCE
+                .multiplyScalar(BUMP_DISTANCE);
 
-            // 3. Update targetPosition to be the original position PLUS the bump.
-            // This is the final X/Z position for this frame.
             targetPosition.x = originalPosition.x + tempBumpVector.x;
             targetPosition.z = originalPosition.z + tempBumpVector.z;
 
-            // 4. Set movement flags
-            moving = false; // Stop animation and cancel the main move
+            moving = false;
 
-            // 5. New: Stop current movement animations and play fall/death action
             if (runAction) runAction.stop();
             if (walkAction) walkAction.stop();
 
             if (fallAction) {
                 fallAction.reset().play();
 
-                // 6. New: Lock controls for 3 seconds
                 controlsLocked = true;
                 setTimeout(() => {
                     controlsLocked = false;
-                }, 1000); // 3000 milliseconds = 3 seconds
+                }, 1000);
 
-                // 7. New: Play bump sound
                 if (bumpSound && !bumpSound.isPlaying) {
                     bumpSound.play();
                 }
 
-                // Stop continuous sounds if they are playing during the bump
                 if (runningSound && runningSound.isPlaying) runningSound.stop();
                 if (waterSound && waterSound.isPlaying) waterSound.stop();
             }
         }
     }
 
-    // 2. Actual movement after verification
     playerModel.position.x = targetPosition.x;
     playerModel.position.z = targetPosition.z;
 
-    // 3. Raycasting down to set the Y height in the NEW position
     const finalOrigin = playerModel.position.clone();
     finalOrigin.y += 20;
 
@@ -608,20 +570,18 @@ function handlePlayerMovement() {
 
     const intersects = raycaster.intersectObjects(worldObjects, true);
 
-    let isWater = false; // Initialize/reset water state for the current frame
+    let isWater = false;
 
     if (intersects.length > 0) {
         const distanceToGround = intersects[0].distance;
         const groundHeight = finalOrigin.y - distanceToGround;
 
-        // Check the material of the ground the player is currently on
         const hitObject = intersects[0].object as THREE.Mesh;
         if (hitObject.material && "color" in hitObject.material) {
             const materialColor = (
                 hitObject.material as THREE.MeshStandardMaterial
             ).color;
 
-            // Water materials identified by their hex color (0x00bfd4 and 0x81dfeb)
             if (
                 materialColor.getHex() === 0x00bfd4 ||
                 materialColor.getHex() === 0x81dfeb
@@ -630,13 +590,12 @@ function handlePlayerMovement() {
             }
         }
 
-        // Calculate the height offset: sink if it's water, otherwise no offset (0)
         const playerHeightOffset = isWater ? WATER_SINK_DEPTH : 0;
 
         playerModel.position.y = groundHeight + playerHeightOffset;
     } else {
         if (playerModel.position.y > 0) {
-            playerModel.position.y -= 0.1; // Simple gravity fall
+            playerModel.position.y -= 0.1;
         }
     }
 
@@ -650,7 +609,6 @@ function handlePlayerMovement() {
     let isRunning = moving;
 
     if (isRunning && isWater) {
-        // Trigger splash effect at a timed interval
         if (clock.getElapsedTime() > lastSplashTime + SPLASH_EMISSION_RATE) {
             if (playerModel) {
                 spawnSplash(playerModel.position);
@@ -660,7 +618,6 @@ function handlePlayerMovement() {
     }
 
     if (runAction && walkAction) {
-        // Animation and sound logic only runs if controls are NOT locked
         if (!controlsLocked) {
             if (isRunning) {
                 if (isWater) {
@@ -708,12 +665,10 @@ function handlePlayerMovement() {
                 }
             }
         } else {
-            // If controls are locked, ensure movement animations are stopped
             if (runAction && runAction.isRunning()) runAction.stop();
             if (walkAction && walkAction.isRunning()) walkAction.stop();
         }
     } else {
-        // Fallback for sound control if actions are missing, also respecting control lock
         if (!controlsLocked) {
             if (isRunning) {
                 if (isWater) {
@@ -745,11 +700,10 @@ function handlePlayerMovement() {
     }
 }
 
-// Function to update the camera position (TPP view)
 function updateCameraPosition(instant: boolean = false) {
     if (!playerModel) return;
 
-    const offset = new THREE.Vector3(0, 3, -7); // Camera offset (x, y, z) relative to player
+    const offset = new THREE.Vector3(0, 3, -7);
     const targetPosition = new THREE.Vector3();
 
     // Apply the offset in the player's local coordinate system
@@ -791,9 +745,7 @@ window.addEventListener("keyup", (event) => {
     keys[event.key] = false;
 });
 
-// Function to setup the FPS counter HTML element and styles
 function setupFpsCounter() {
-    // Inject styling for the counter
     const style = document.createElement('style');
     style.textContent = `
         #fps-counter {
@@ -811,7 +763,6 @@ function setupFpsCounter() {
     `;
     document.head.appendChild(style);
 
-    // Create the element
     fpsElement = document.createElement('div');
     fpsElement.id = 'fps-counter';
     fpsElement.textContent = 'FPS: --';
@@ -822,7 +773,7 @@ createWorld();
 createSun();
 createClouds();
 createPlayer();
-setupFpsCounter(); // Setup the FPS counter before starting the animation loop
+setupFpsCounter();
 
 function animate() {
     requestAnimationFrame(animate);
@@ -830,14 +781,9 @@ function animate() {
     const now = performance.now();
     const elapsed = now - then;
 
-    // --- FPS CAP LOGIC ---
     if (elapsed > interval) {
-        // Get ready for next frame by adjusting for the time lag
         then = now - (elapsed % interval);
 
-        // --- CORE GAME LOOP LOGIC (Only runs when frame is drawn) ---
-
-        // 1. Update FPS Counter
         frameCount++;
         if (now > lastTime + fpsInterval) {
             const fps = Math.round((frameCount * 1000) / (now - lastTime));
@@ -848,14 +794,13 @@ function animate() {
             frameCount = 0;
         }
 
-        // 2. Update Animations, Physics, and Particles
         const delta = clock.getDelta();
         if (mixer) {
             mixer.update(delta);
         }
 
         handlePlayerMovement();
-        updateSplashes(delta); // NEW: Update the splash particles
+        updateSplashes(delta);
 
         updateCameraPosition();
 
@@ -871,14 +816,13 @@ function animate() {
 
             dirLight.position.set(
                 playerX + offsetX,
-                offsetY, // Keep light at a fixed height
+                offsetY,
                 playerZ + offsetZ,
             );
 
             dirLight.target.updateMatrixWorld();
         }
 
-        // 3. Render
         renderer.render(scene, camera);
     }
 }
