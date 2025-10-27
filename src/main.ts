@@ -2,9 +2,10 @@ import * as THREE from "three";
 import {type GLTF, GLTFLoader} from "three/addons/loaders/GLTFLoader.js";
 import {acceleratedRaycast, MeshBVH} from "three-mesh-bvh";
 
-import runningSoundUrl from "/src/sfx/running-on-the-floor-359909.mp3";
+import runningSoundUrl from "/src/sfx/running-in-grass-6237.mp3";
 import waterSoundUrl from "/src/sfx/walking-in-water-199418.mp3";
 import bumpSoundUrl from "/src/sfx/manbonk-357114.mp3";
+import forestAtmosphereUrl from "/src/sfx/forest-atmosphere-001localization-poland-329745.mp3";
 
 const scene = new THREE.Scene();
 const skyColor = 0x87ceeb;
@@ -64,6 +65,7 @@ const loader = new GLTFLoader();
 let runningSound: THREE.PositionalAudio | null = null;
 let waterSound: THREE.PositionalAudio | null = null;
 let bumpSound: THREE.PositionalAudio | null = null;
+let backgroundMusic: THREE.Audio | null = null;
 
 let playerModel: THREE.Group | null = null;
 const RUN_SPEED = 1.2;
@@ -474,7 +476,7 @@ function loadAudio() {
             if (runningSound) {
                 runningSound.setBuffer(buffer);
                 runningSound.setLoop(true);
-                runningSound.setVolume(0.5);
+                runningSound.setVolume(1.5);
                 runningSound.setRefDistance(10);
             }
         },
@@ -510,8 +512,8 @@ function loadAudio() {
             if (bumpSound) {
                 bumpSound.setBuffer(buffer);
                 bumpSound.setLoop(false);
-                bumpSound.setVolume(1.0);
-                bumpSound.setRefDistance(5);
+                bumpSound.setVolume(0.5);
+                bumpSound.setRefDistance(10);
             }
         },
         undefined,
@@ -520,6 +522,24 @@ function loadAudio() {
         },
     );
     playerModel.add(bumpSound);
+
+    // Load and play background music
+    backgroundMusic = new THREE.Audio(listener);
+    audioLoader.load(
+        forestAtmosphereUrl,
+        function (buffer) {
+            if (backgroundMusic) {
+                backgroundMusic.setBuffer(buffer);
+                backgroundMusic.setLoop(true);
+                backgroundMusic.setVolume(0.3);
+                backgroundMusic.play();
+            }
+        },
+        undefined,
+        (err) => {
+            console.error("Error loading background music:", err);
+        },
+    );
 }
 
 async function createPlayer() {
