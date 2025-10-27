@@ -111,7 +111,11 @@ interface AnimalInstance {
     deathAction: THREE.AnimationAction | null;
     isPlayingDeath: boolean;
     allowedAnimations: THREE.AnimationClip[];
+    walkAnimation: THREE.AnimationClip | null;
     nextAnimationChangeTime: number;
+    isWalking: boolean;
+    walkEndTime: number;
+    moveSpeed: number;
 }
 
 const animalInstances: AnimalInstance[] = [];
@@ -426,6 +430,7 @@ async function spawnAnimals(count: number) {
             let animalAction: THREE.AnimationAction | null = null;
             let animalDeathAction: THREE.AnimationAction | null = null;
             let allowedAnimations: THREE.AnimationClip[] = [];
+            let walkAnimation: THREE.AnimationClip | null = null;
 
             if (animations && animations.length > 0) {
                 animalMixer = new THREE.AnimationMixer(model);
@@ -435,8 +440,19 @@ async function spawnAnimals(count: number) {
                     const name = clip.name.toLowerCase();
                     return (name.includes('eating') || name.includes('idle'))
                         && !name.includes('jump')
-                        && !name.includes('hit');
+                        && !name.includes('hit')
+                        && !name.includes('walk');
                 });
+
+                // Find walk animation
+                walkAnimation = animations.find(clip => {
+                    const name = clip.name.toLowerCase();
+                    return name.includes('walk') && !name.includes('death') && !name.includes('hit');
+                }) || null;
+
+                if (walkAnimation) {
+                    console.log(`Found walk animation "${walkAnimation.name}" for ${randomAnimalModel}`);
+                }
 
                 // Find death animation
                 const deathClip = animations.find(clip => clip.name.toLowerCase().includes('death'));
@@ -471,7 +487,11 @@ async function spawnAnimals(count: number) {
                 deathAction: animalDeathAction,
                 isPlayingDeath: false,
                 allowedAnimations: allowedAnimations,
-                nextAnimationChangeTime: clock.getElapsedTime() + 2 + Math.random() * 8 // 2-10 seconds
+                walkAnimation: walkAnimation,
+                nextAnimationChangeTime: clock.getElapsedTime() + 2 + Math.random() * 8, // 2-10 seconds
+                isWalking: false,
+                walkEndTime: 0,
+                moveSpeed: 0.01 + Math.random() * 0.03
             });
 
         } catch (err) {
@@ -750,12 +770,12 @@ function playAnimalDeathAnimation(animalModel: THREE.Group) {
         return; // Already playing death animation
     }
 
-    // Fade out current animation and play death
+    // Stop current animation and play death
     if (animalInstance.action.isRunning()) {
-        animalInstance.action.fadeOut(0.2);
+        animalInstance.action.stop();
     }
 
-    animalInstance.deathAction.reset().fadeIn(0.2).play();
+    animalInstance.deathAction.reset().play();
     animalInstance.isPlayingDeath = true;
 
     // Setup event listener for when death animation finishes
@@ -763,8 +783,8 @@ function playAnimalDeathAnimation(animalModel: THREE.Group) {
         const onFinished = (e: any) => {
             if (e.action === animalInstance.deathAction) {
                 // Death animation finished, return to idle/eating
-                animalInstance.deathAction!.fadeOut(0.2);
-                animalInstance.action!.reset().fadeIn(0.2).play();
+                animalInstance.deathAction!.stop();
+                animalInstance.action!.reset().play();
                 animalInstance.isPlayingDeath = false;
 
                 // Remove this specific listener
@@ -776,35 +796,178 @@ function playAnimalDeathAnimation(animalModel: THREE.Group) {
 }
 
 function changeAnimalAnimation(animalInstance: AnimalInstance) {
-    if (!animalInstance.mixer || !animalInstance.allowedAnimations || animalInstance.allowedAnimations.length === 0) {
+    if (!animalInstance.mixer || animalInstance.isPlayingDeath) {
         return;
     }
 
-    // Don't change animation if playing death animation
-    if (animalInstance.isPlayingDeath) {
-        return;
+    const currentTime = clock.getElapsedTime();
+
+    // 40% chance to walk if walk animation is available
+    const shouldWalk = animalInstance.walkAnimation && Math.random() < 0.4;
+
+    if (shouldWalk && animalInstance.walkAnimation) {
+        // Start walking
+        if (animalInstance.action && animalInstance.action.isRunning()) {
+            animalInstance.action.stop();
+        }
+
+        const walkAction = animalInstance.mixer.clipAction(animalInstance.walkAnimation);
+        walkAction.reset();
+        walkAction.setLoop(THREE.LoopRepeat, Infinity);
+        walkAction.play();
+
+        animalInstance.action = walkAction;
+        animalInstance.isWalking = true;
+        animalInstance.walkEndTime = currentTime + 2 + Math.random() * 4; // Walk for 2-6 seconds
+    } else if (animalInstance.allowedAnimations.length > 0) {
+        // Pick a random idle/eating animation
+        const randomClip = animalInstance.allowedAnimations[Math.floor(Math.random() * animalInstance.allowedAnimations.length)];
+
+        if (animalInstance.action && animalInstance.action.isRunning()) {
+            animalInstance.action.stop();
+        }
+
+        const newAction = animalInstance.mixer.clipAction(randomClip);
+        newAction.reset();
+        newAction.setLoop(THREE.LoopRepeat, Infinity);
+        newAction.play();
+
+        animalInstance.action = newAction;
+        animalInstance.isWalking = false;
     }
-
-    // Pick a random animation from allowed list
-    const randomClip = animalInstance.allowedAnimations[Math.floor(Math.random() * animalInstance.allowedAnimations.length)];
-
-    // Fade out current animation if playing
-    if (animalInstance.action && animalInstance.action.isRunning()) {
-        animalInstance.action.fadeOut(0.3);
-    }
-
-    // Create and play new animation action
-    const newAction = animalInstance.mixer.clipAction(randomClip);
-    newAction.reset();
-    newAction.setLoop(THREE.LoopRepeat, Infinity);
-    newAction.fadeIn(0.3);
-    newAction.play();
-
-    // Update the current action reference
-    animalInstance.action = newAction;
 
     // Schedule next animation change (2-10 seconds)
-    animalInstance.nextAnimationChangeTime = clock.getElapsedTime() + 2 + Math.random() * 8;
+    animalInstance.nextAnimationChangeTime = currentTime + 2 + Math.random() * 8;
+}
+
+function updateAnimalMovement(animalInstance: AnimalInstance) {
+    if (!animalInstance.isWalking || animalInstance.isPlayingDeath) {
+        return;
+    }
+
+    const currentTime = clock.getElapsedTime();
+
+    // Check if walking time is over
+    if (currentTime >= animalInstance.walkEndTime) {
+        animalInstance.isWalking = false;
+
+        // Stop walk animation immediately and switch to idle
+        if (animalInstance.action && animalInstance.action.isRunning()) {
+            animalInstance.action.stop();
+        }
+
+        // Pick a random idle/eating animation
+        if (animalInstance.mixer && animalInstance.allowedAnimations.length > 0) {
+            const randomClip = animalInstance.allowedAnimations[Math.floor(Math.random() * animalInstance.allowedAnimations.length)];
+            const idleAction = animalInstance.mixer.clipAction(randomClip);
+            idleAction.reset();
+            idleAction.setLoop(THREE.LoopRepeat, Infinity);
+            idleAction.play();
+            animalInstance.action = idleAction;
+        }
+
+        return;
+    }
+
+    const animal = animalInstance.model;
+    const ANIMAL_HEIGHT = 1.5;
+    const OBSTACLE_CHECK_DISTANCE = 2.0;
+    const TURN_ANGLE = Math.PI / 4; // 45 degrees
+
+    // Get forward direction
+    const forward = new THREE.Vector3(0, 0, 1);
+    forward.applyQuaternion(animal.quaternion);
+
+    // Check for obstacles ahead
+    const rayOrigin = animal.position.clone();
+    rayOrigin.y += ANIMAL_HEIGHT / 2;
+
+    raycaster.set(rayOrigin, forward);
+    raycaster.far = OBSTACLE_CHECK_DISTANCE;
+    const intersects = raycaster.intersectObjects(worldObjects, true);
+    raycaster.far = Infinity;
+
+    let hasObstacle = false;
+    if (intersects.length > 0) {
+        hasObstacle = intersects[0].distance < OBSTACLE_CHECK_DISTANCE;
+    }
+
+    // Check if other animals are in the way
+    if (!hasObstacle) {
+        const futurePosition = animal.position.clone();
+        futurePosition.addScaledVector(forward, OBSTACLE_CHECK_DISTANCE);
+
+        for (const otherAnimal of animals) {
+            if (otherAnimal === animal) continue;
+
+            const distance = futurePosition.distanceTo(otherAnimal.position);
+            if (distance < 1.5) {
+                hasObstacle = true;
+                break;
+            }
+        }
+    }
+
+    // Check if player is in the way
+    if (!hasObstacle && playerModel) {
+        const futurePosition = animal.position.clone();
+        futurePosition.addScaledVector(forward, OBSTACLE_CHECK_DISTANCE);
+
+        const distanceToPlayer = futurePosition.distanceTo(playerModel.position);
+        if (distanceToPlayer < 2.0) {
+            hasObstacle = true;
+        }
+    }
+
+    if (hasObstacle) {
+        // Turn away from obstacle - randomly choose left or right
+        const turnDirection = Math.random() < 0.5 ? 1 : -1;
+        animal.rotation.y += TURN_ANGLE * turnDirection;
+    } else {
+        // Move forward
+        const moveVector = forward.multiplyScalar(animalInstance.moveSpeed * 0.016 * 60); // Normalize to ~60fps
+        const newPosition = animal.position.clone().add(moveVector);
+
+        // Check ground height at new position
+        const groundCheckOrigin = newPosition.clone();
+        groundCheckOrigin.y += 10;
+        const downVector = new THREE.Vector3(0, -1, 0);
+
+        raycaster.set(groundCheckOrigin, downVector);
+        const groundIntersects = raycaster.intersectObjects(worldObjects, true);
+
+        if (groundIntersects.length > 0) {
+            const groundY = groundIntersects[0].point.y;
+
+            // Check if terrain is not too steep and not water
+            const normal = groundIntersects[0].face?.normal;
+            let isSafe = true;
+
+            if (normal) {
+                const worldNormal = normal.clone().applyMatrix3(
+                    new THREE.Matrix3().getNormalMatrix(groundIntersects[0].object.matrixWorld)
+                ).normalize();
+                const slopeDot = worldNormal.dot(new THREE.Vector3(0, 1, 0));
+                isSafe = slopeDot > 0.6; // Not too steep
+            }
+
+            // Check if it's water (low elevation)
+            const isWater = groundY < 0.5;
+            if (isWater) {
+                isSafe = false;
+            }
+
+            if (isSafe) {
+                // Move to new position
+                animal.position.x = newPosition.x;
+                animal.position.z = newPosition.z;
+                animal.position.y = groundY;
+            } else {
+                // Turn around if terrain is unsafe
+                animal.rotation.y += Math.PI / 3; // Turn 60 degrees
+            }
+        }
+    }
 }
 
 function handlePlayerMovement() {
@@ -1307,6 +1470,9 @@ function animate() {
             if (currentTime >= animalInstance.nextAnimationChangeTime) {
                 changeAnimalAnimation(animalInstance);
             }
+
+            // Update animal movement
+            updateAnimalMovement(animalInstance);
         }
 
         handlePlayerMovement();
