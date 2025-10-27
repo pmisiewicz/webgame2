@@ -85,6 +85,9 @@ minimapScene.add(minimapPlayerMarker);
 // Spider markers (no animal markers)
 const minimapSpiderMarkers: THREE.Mesh[] = [];
 
+// Crystal markers
+const minimapCrystalMarkers: THREE.Mesh[] = [];
+
 const hemiLight = new THREE.HemisphereLight(0xffffff, 0xdddddd, 1.2);
 hemiLight.position.set(0, 100, 0);
 scene.add(hemiLight);
@@ -343,9 +346,9 @@ function updateAndRenderMinimap(): void {
         if (i >= minimapSpiderMarkers.length) {
             // Create new spider marker - red sphere with ring
             const marker = new THREE.Mesh(
-                new THREE.SphereGeometry(2, 16, 16),
+                new THREE.SphereGeometry(3, 16, 16),
                 new THREE.MeshBasicMaterial({
-                    color: 0xff0000,
+                    color: 0x000000,
                     transparent: true,
                     opacity: 0.9
                 })
@@ -353,9 +356,9 @@ function updateAndRenderMinimap(): void {
 
             // Add glowing ring around spider
             const ring = new THREE.Mesh(
-                new THREE.RingGeometry(2, 3, 16),
+                new THREE.RingGeometry(4, 5, 16),
                 new THREE.MeshBasicMaterial({
-                    color: 0xffaa00,
+                    color: 0xff0000,
                     side: THREE.DoubleSide,
                     transparent: true,
                     opacity: 0.7
@@ -372,6 +375,45 @@ function updateAndRenderMinimap(): void {
         marker.position.x = spider.model.position.x;
         marker.position.y = 50; // Same height as player marker
         marker.position.z = spider.model.position.z;
+    }
+
+    // Update crystal markers - match crystal colors
+    for (let i = 0; i < crystals.length; i++) {
+        if (i >= minimapCrystalMarkers.length) {
+            // Get the crystal's color
+            const crystalColor = 0x00aaff;
+
+            // Create new crystal marker with matching color
+            const marker = new THREE.Mesh(
+                new THREE.SphereGeometry(2, 8, 8),
+                new THREE.MeshBasicMaterial({
+                    color: crystalColor,
+                    transparent: true,
+                    opacity: 0.9
+                })
+            );
+
+            // Add small glow ring with matching color
+            const ring = new THREE.Mesh(
+                new THREE.RingGeometry(2, 3, 8),
+                new THREE.MeshBasicMaterial({
+                    color: 0xffffff,
+                    side: THREE.DoubleSide,
+                    transparent: true,
+                    opacity: 0.8
+                })
+            );
+            ring.rotation.x = -Math.PI / 2;
+            marker.add(ring);
+
+            minimapCrystalMarkers.push(marker);
+            minimapScene.add(marker);
+        }
+        const crystal = crystals[i];
+        const marker = minimapCrystalMarkers[i];
+        marker.position.x = crystal.position.x;
+        marker.position.y = 50; // Same height as player marker
+        marker.position.z = crystal.position.z;
     }
 
     // Render minimap
@@ -946,6 +988,132 @@ function updateSpiderJumpBack(spider: SpiderInstance) {
             spider.walkAction.reset().play();
         }
     }
+}
+
+// Crystal system
+const crystals: THREE.Group[] = [];
+
+async function spawnCrystals(count: number) {
+    const areaSize = 250;
+    const spawnAttempts = 20;
+    const MIN_DISTANCE_FROM_PLAYER = 20; // Minimum distance from player spawn point
+    const playerStartPos = new THREE.Vector3(5, 0, 8);
+
+    for (let i = 0; i < count; i++) {
+        try {
+            const {model} = await loadModel("Crystal.glb");
+
+            incrementLoadingProgress(`Loading Crystals... (${i + 1}/${count})`);
+
+            // Crystal scale - make them smaller
+            const scaleFactor = 0.1;
+            model.scale.setScalar(scaleFactor);
+
+            // Random rotation for variety
+            model.rotation.y = Math.random() * Math.PI * 2;
+
+            // Try to find a valid position on the ground
+            let validPosition = false;
+            let attempts = 0;
+
+            while (!validPosition && attempts < spawnAttempts) {
+                attempts++;
+
+                const x = (Math.random() - 0.5) * areaSize;
+                const z = (Math.random() - 0.5) * areaSize;
+                const y = 50; // Start high for raycasting
+
+                // Check distance from player starting position
+                const spawnPos = new THREE.Vector3(x, 0, z);
+                const distanceFromPlayer = spawnPos.distanceTo(playerStartPos);
+
+                if (distanceFromPlayer < MIN_DISTANCE_FROM_PLAYER) {
+                    continue; // Too close to player, try again
+                }
+
+                const origin = new THREE.Vector3(x, y, z);
+                raycaster.set(origin, down);
+                const intersects = raycaster.intersectObjects(worldObjects, true);
+
+                if (intersects.length > 0) {
+                    const groundY = intersects[0].point.y;
+                    const hitPoint = intersects[0].point;
+                    const hitObject = intersects[0].object as THREE.Mesh;
+
+                    // Check if it's water - both by material color and height
+                    const isWater = isWaterSurface(hitObject) || groundY < 0.5;
+
+                    // Check for clearance above (not under trees or other objects)
+                    const clearanceHeight = 4.0;
+                    const clearanceOrigin = hitPoint.clone();
+                    clearanceOrigin.y += 0.1;
+                    const upRay = new THREE.Vector3(0, 1, 0);
+                    raycaster.set(clearanceOrigin, upRay);
+                    raycaster.far = clearanceHeight;
+                    const clearanceIntersects = raycaster.intersectObjects(worldObjects, true);
+                    raycaster.far = Infinity;
+
+                    const hasClearance = clearanceIntersects.length === 0;
+
+                    // Check slope - crystals should be on relatively flat ground
+                    const normal = intersects[0].face?.normal;
+                    let slopeDot = 1;
+                    if (normal) {
+                        const worldNormal = normal.clone().applyMatrix3(
+                            new THREE.Matrix3().getNormalMatrix(hitObject.matrixWorld)
+                        ).normalize();
+                        slopeDot = worldNormal.dot(new THREE.Vector3(0, 1, 0));
+                    }
+                    const minSlopeDot = 0.85; // Roughly 30 degrees max slope
+
+                    // Accept position if: not water, not too steep, has clearance, height is accessible
+                    if (!isWater && slopeDot >= minSlopeDot && hasClearance) {
+                        model.position.set(x, groundY, z);
+                        validPosition = true;
+                    }
+                }
+            }
+
+            if (!validPosition) {
+                // Fallback: place near origin if no valid position found
+                console.warn(`Could not find valid position for crystal ${i + 1}, placing at origin`);
+                model.position.set(0, 0, 0);
+            }
+
+            // Random color selection for crystal glow
+            const colorPalette = [
+                0x0099ff, // Blue
+                0x00ff66, // Green
+                0xff3333, // Red
+                0xff66ff, // Pink
+                0xffff00, // Yellow
+                0xff8800, // Orange
+                0xaa00ff  // Purple
+            ];
+            const randomColor = colorPalette[Math.floor(Math.random() * colorPalette.length)];
+
+            model.traverse((child) => {
+                if ((child as THREE.Mesh).isMesh) {
+                    const mesh = child as THREE.Mesh;
+                    mesh.castShadow = true;
+                    mesh.receiveShadow = true;
+
+                    if (mesh.material) {
+                        const material = mesh.material as THREE.MeshStandardMaterial;
+                        material.emissive = new THREE.Color(randomColor);
+                        material.emissiveIntensity = 1;
+                    }
+                }
+            });
+
+            scene.add(model);
+            crystals.push(model);
+        } catch (err) {
+            console.warn(`Failed to load crystal model:`, err);
+        }
+    }
+
+    console.log(`Spawned ${crystals.length} crystals on the map`);
 }
 
 function loadAudio() {
@@ -2051,8 +2219,8 @@ function incrementLoadingProgress(stepName: string) {
 setupFpsCounter();
 setupLoadingBar();
 
-// Initialize loading with total steps: sun (1) + clouds (1) + player (2 steps) + world (2 steps) + 20 animals + 5 spiders
-initializeLoading(1 + 1 + 2 + 2 + 20 + 5);
+// Initialize loading with total steps: sun (1) + clouds (1) + player (2 steps) + world (2 steps) + 20 animals + 5 spiders + 10 crystals
+initializeLoading(1 + 1 + 2 + 2 + 20 + 5 + 10);
 
 createSun().then(() => {
     return createClouds();
@@ -2064,6 +2232,8 @@ createSun().then(() => {
     return spawnAnimals(20);
 }).then(() => {
     return spawnSpiders(5);
+}).then(() => {
+    return spawnCrystals(10);
 });
 
 function animate() {
