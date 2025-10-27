@@ -344,7 +344,7 @@ async function createPlayer() {
 
         const bbox = new THREE.Box3().setFromObject(playerModel);
         const modelHeight = bbox.max.y - bbox.min.y;
-        playerHeight = modelHeight * 0.9; // Use 90% of model height for raycasting
+        playerHeight = modelHeight;
         console.log(`Player model height: ${modelHeight.toFixed(2)}`);
 
         scene.add(playerModel);
@@ -532,7 +532,7 @@ function handlePlayerMovement() {
         // Horizontal collision detection - check for walls/obstacles at player level
         const movementDirection = new THREE.Vector3().subVectors(targetPosition, originalPosition).normalize();
         const horizontalOrigin = originalPosition.clone();
-        horizontalOrigin.y += playerHeight / 2;
+        horizontalOrigin.y += playerHeight + 0.2;
 
         raycaster.set(horizontalOrigin, movementDirection);
         raycaster.far = COLLISION_RADIUS;
