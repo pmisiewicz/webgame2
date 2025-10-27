@@ -171,7 +171,9 @@ async function loadModel(
     });
 }
 
-function createSun() {
+async function createSun() {
+    incrementLoadingProgress('Creating Sun...');
+
     const sunGroup = new THREE.Group();
 
     const sunGeometry = new THREE.SphereGeometry(8, 32, 32);
@@ -242,7 +244,9 @@ function createCloud(): THREE.Group {
     return cloud;
 }
 
-function createClouds() {
+async function createClouds() {
+    incrementLoadingProgress('Creating Clouds...');
+
     const cloudCount = 25;
     const areaSize = 250;
     const altitude = 25;
@@ -311,10 +315,7 @@ async function spawnAnimals(count: number) {
         try {
             const {model, animations} = await loadModel(randomAnimalModel);
 
-            // Update loading progress every 5 animals
-            if (i % 5 === 0 || i === count - 1) {
-                incrementLoadingProgress(`Loading Animals... (${i + 1}/${count})`);
-            }
+            incrementLoadingProgress(`Loading Animals... (${i + 1}/${count})`);
 
             // Random scale variation for each animal
             const scaleFactor = 0.4 + Math.random() * 0.3; // 0.4 to 0.7
@@ -1013,15 +1014,17 @@ function incrementLoadingProgress(stepName: string) {
     updateLoadingBar(progress, stepName);
 }
 
-createSun();
-createClouds();
 setupFpsCounter();
 setupLoadingBar();
 
-// Initialize loading with total steps: player (2 steps) + world (2 steps) + animals (6 steps for 25 animals, updating every 5)
-initializeLoading(10);
+// Initialize loading with total steps: sun (1) + clouds (1) + player (2 steps) + world (2 steps) + 25 animals
+initializeLoading(31);
 
-createPlayer().then(() => {
+createSun().then(() => {
+    return createClouds();
+}).then(() => {
+    return createPlayer();
+}).then(() => {
     return createWorld();
 }).then(() => {
     return spawnAnimals(25);
