@@ -105,6 +105,8 @@ interface AnimalInstance {
     model: THREE.Group;
     mixer: THREE.AnimationMixer | null;
     action: THREE.AnimationAction | null;
+    deathAction: THREE.AnimationAction | null;
+    isPlayingDeath: boolean;
 }
 
 const animalInstances: AnimalInstance[] = [];
@@ -407,8 +409,12 @@ async function spawnAnimals(count: number) {
 
             let animalMixer: THREE.AnimationMixer | null = null;
             let animalAction: THREE.AnimationAction | null = null;
+            let animalDeathAction: THREE.AnimationAction | null = null;
 
             if (animations && animations.length > 0) {
+                animalMixer = new THREE.AnimationMixer(model);
+
+                // Find idle/eating animations
                 const allowedAnimations = animations.filter(clip => {
                     const name = clip.name.toLowerCase();
                     return (name.includes('eating') || name.includes('idle'))
@@ -416,9 +422,10 @@ async function spawnAnimals(count: number) {
                         && !name.includes('hit');
                 });
 
-                if (allowedAnimations.length > 0) {
-                    animalMixer = new THREE.AnimationMixer(model);
+                // Find death animation
+                const deathClip = animations.find(clip => clip.name.toLowerCase().includes('death'));
 
+                if (allowedAnimations.length > 0) {
                     // Pick a random animation clip from allowed animations
                     const randomClip = allowedAnimations[Math.floor(Math.random() * allowedAnimations.length)];
                     animalAction = animalMixer.clipAction(randomClip);
@@ -429,6 +436,14 @@ async function spawnAnimals(count: number) {
                 } else {
                     console.log(`No Eating/Idle animations found for ${randomAnimalModel}`);
                 }
+
+                // Setup death animation if available
+                if (deathClip) {
+                    animalDeathAction = animalMixer.clipAction(deathClip);
+                    animalDeathAction.setLoop(THREE.LoopOnce, 1);
+                    animalDeathAction.clampWhenFinished = true;
+                    console.log(`Death animation "${deathClip.name}" ready for ${randomAnimalModel}`);
+                }
             }
 
             scene.add(model);
@@ -436,7 +451,9 @@ async function spawnAnimals(count: number) {
             animalInstances.push({
                 model: model,
                 mixer: animalMixer,
-                action: animalAction
+                action: animalAction,
+                deathAction: animalDeathAction,
+                isPlayingDeath: false
             });
 
         } catch (err) {
@@ -647,6 +664,45 @@ function updateSplashes(delta: number) {
 }
 
 
+/**
+ * Triggers the death animation for an animal, then returns to idle/eating animation
+ */
+function playAnimalDeathAnimation(animalModel: THREE.Group) {
+    const animalInstance = animalInstances.find(instance => instance.model === animalModel);
+
+    if (!animalInstance || !animalInstance.deathAction || !animalInstance.action) {
+        return; // No death animation available
+    }
+
+    if (animalInstance.isPlayingDeath) {
+        return; // Already playing death animation
+    }
+
+    // Fade out current animation and play death
+    if (animalInstance.action.isRunning()) {
+        animalInstance.action.fadeOut(0.2);
+    }
+
+    animalInstance.deathAction.reset().fadeIn(0.2).play();
+    animalInstance.isPlayingDeath = true;
+
+    // Setup event listener for when death animation finishes
+    if (animalInstance.mixer) {
+        const onFinished = (e: any) => {
+            if (e.action === animalInstance.deathAction) {
+                // Death animation finished, return to idle/eating
+                animalInstance.deathAction!.fadeOut(0.2);
+                animalInstance.action!.reset().fadeIn(0.2).play();
+                animalInstance.isPlayingDeath = false;
+
+                // Remove this specific listener
+                animalInstance.mixer!.removeEventListener('finished', onFinished);
+            }
+        };
+        animalInstance.mixer.addEventListener('finished', onFinished);
+    }
+}
+
 function handlePlayerMovement() {
     if (!playerModel) return;
 
@@ -724,6 +780,7 @@ function handlePlayerMovement() {
         }
 
         let hitAnimal = false;
+        let collidedAnimal: THREE.Group | null = null;
         const animalCollisionRadius = 0.8;
         const combinedRadius = COLLISION_RADIUS + animalCollisionRadius;
 
@@ -731,6 +788,7 @@ function handlePlayerMovement() {
             const futureDistance = targetPosition.distanceTo(animal.position);
             if (futureDistance < combinedRadius) {
                 hitAnimal = true;
+                collidedAnimal = animal;
                 break;
             }
         }
@@ -769,6 +827,11 @@ function handlePlayerMovement() {
 
                 if (runningSound && runningSound.isPlaying) runningSound.stop();
                 if (waterSound && waterSound.isPlaying) waterSound.stop();
+            }
+
+            // Trigger animal death animation if we hit an animal
+            if (hitAnimal && collidedAnimal) {
+                playAnimalDeathAnimation(collidedAnimal);
             }
         }
     }
