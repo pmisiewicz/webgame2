@@ -111,6 +111,8 @@ interface AnimalInstance {
     action: THREE.AnimationAction | null;
     deathAction: THREE.AnimationAction | null;
     isPlayingDeath: boolean;
+    allowedAnimations: THREE.AnimationClip[];
+    nextAnimationChangeTime: number;
 }
 
 const animalInstances: AnimalInstance[] = [];
@@ -424,12 +426,13 @@ async function spawnAnimals(count: number) {
             let animalMixer: THREE.AnimationMixer | null = null;
             let animalAction: THREE.AnimationAction | null = null;
             let animalDeathAction: THREE.AnimationAction | null = null;
+            let allowedAnimations: THREE.AnimationClip[] = [];
 
             if (animations && animations.length > 0) {
                 animalMixer = new THREE.AnimationMixer(model);
 
                 // Find idle/eating animations
-                const allowedAnimations = animations.filter(clip => {
+                allowedAnimations = animations.filter(clip => {
                     const name = clip.name.toLowerCase();
                     return (name.includes('eating') || name.includes('idle'))
                         && !name.includes('jump')
@@ -467,7 +470,9 @@ async function spawnAnimals(count: number) {
                 mixer: animalMixer,
                 action: animalAction,
                 deathAction: animalDeathAction,
-                isPlayingDeath: false
+                isPlayingDeath: false,
+                allowedAnimations: allowedAnimations,
+                nextAnimationChangeTime: clock.getElapsedTime() + 2 + Math.random() * 8 // 2-10 seconds
             });
 
         } catch (err) {
@@ -769,6 +774,38 @@ function playAnimalDeathAnimation(animalModel: THREE.Group) {
         };
         animalInstance.mixer.addEventListener('finished', onFinished);
     }
+}
+
+function changeAnimalAnimation(animalInstance: AnimalInstance) {
+    if (!animalInstance.mixer || !animalInstance.allowedAnimations || animalInstance.allowedAnimations.length === 0) {
+        return;
+    }
+
+    // Don't change animation if playing death animation
+    if (animalInstance.isPlayingDeath) {
+        return;
+    }
+
+    // Pick a random animation from allowed list
+    const randomClip = animalInstance.allowedAnimations[Math.floor(Math.random() * animalInstance.allowedAnimations.length)];
+
+    // Fade out current animation if playing
+    if (animalInstance.action && animalInstance.action.isRunning()) {
+        animalInstance.action.fadeOut(0.3);
+    }
+
+    // Create and play new animation action
+    const newAction = animalInstance.mixer.clipAction(randomClip);
+    newAction.reset();
+    newAction.setLoop(THREE.LoopRepeat, Infinity);
+    newAction.fadeIn(0.3);
+    newAction.play();
+
+    // Update the current action reference
+    animalInstance.action = newAction;
+
+    // Schedule next animation change (2-10 seconds)
+    animalInstance.nextAnimationChangeTime = clock.getElapsedTime() + 2 + Math.random() * 8;
 }
 
 function handlePlayerMovement() {
@@ -1223,8 +1260,8 @@ function incrementLoadingProgress(stepName: string) {
 setupFpsCounter();
 setupLoadingBar();
 
-// Initialize loading with total steps: sun (1) + clouds (1) + player (2 steps) + world (2 steps) + 25 animals
-initializeLoading(31);
+// Initialize loading with total steps: sun (1) + clouds (1) + player (2 steps) + world (2 steps) + 20 animals
+initializeLoading(1 + 1 + 2 + 2 + 20);
 
 createSun().then(() => {
     return createClouds();
@@ -1233,7 +1270,7 @@ createSun().then(() => {
 }).then(() => {
     return createWorld();
 }).then(() => {
-    return spawnAnimals(25);
+    return spawnAnimals(20);
 });
 
 function animate() {
@@ -1261,9 +1298,15 @@ function animate() {
         }
 
         // Update animal animations
+        const currentTime = clock.getElapsedTime();
         for (const animalInstance of animalInstances) {
             if (animalInstance.mixer) {
                 animalInstance.mixer.update(delta);
+            }
+
+            // Check if it's time to change animation
+            if (currentTime >= animalInstance.nextAnimationChangeTime) {
+                changeAnimalAnimation(animalInstance);
             }
         }
 
