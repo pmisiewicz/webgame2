@@ -75,7 +75,7 @@ const WALK_SPEED = 0.6;
 let moveSpeed = RUN_SPEED;
 const rotationSpeed = 0.035;
 const MAX_STEP_HEIGHT = 1;
-const BUMP_DISTANCE = 1;
+const BUMP_DISTANCE = 0;
 const WATER_SINK_DEPTH = -0.4;
 let playerHeight = 1;
 const COLLISION_RADIUS = 0.8;
@@ -129,6 +129,7 @@ const JUMP_FORCE = 10;
 const JUMP_GRAVITY = -30;
 const MAX_JUMPS = 2;
 let jumpsRemaining = MAX_JUMPS;
+let bumpSoundPlayed = false;
 
 const FPS_LIMIT = 60;
 const interval = 1000 / FPS_LIMIT;
@@ -907,11 +908,15 @@ function handlePlayerMovement() {
                     }
                 }
             } else {
-                // For walls/obstacles, just play bump sound - no fall animation or controls lock
-                if (bumpSound && !bumpSound.isPlaying) {
+                // For walls/obstacles, play bump sound only once per collision
+                if (bumpSound && !bumpSoundPlayed) {
                     bumpSound.play();
+                    bumpSoundPlayed = true;
                 }
             }
+        } else {
+            // Reset bump sound flag when not colliding with anything
+            bumpSoundPlayed = false;
         }
     }
 
