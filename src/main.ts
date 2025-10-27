@@ -355,7 +355,7 @@ function updateAndRenderMinimap(): void {
             const ring = new THREE.Mesh(
                 new THREE.RingGeometry(2, 3, 16),
                 new THREE.MeshBasicMaterial({
-                    color: 0xffff00,
+                    color: 0xffaa00,
                     side: THREE.DoubleSide,
                     transparent: true,
                     opacity: 0.7
@@ -713,8 +713,10 @@ async function spawnAnimals(count: number) {
 }
 
 async function spawnSpiders(count: number) {
-    const areaSize = 250;
+    const areaSize = 220;
     const spawnAttempts = 15;
+    const MIN_DISTANCE_FROM_PLAYER = 50; // Minimum distance from player spawn point
+    const playerStartPos = new THREE.Vector3(5, 0, 8); // Player starting position (y doesn't matter for distance check)
 
     for (let i = 0; i < count; i++) {
         try {
@@ -740,6 +742,14 @@ async function spawnSpiders(count: number) {
                 const z = (Math.random() - 0.5) * areaSize;
                 const y = 50;
 
+                // Check distance from player starting position
+                const spawnPos = new THREE.Vector3(x, 0, z);
+                const distanceFromPlayer = spawnPos.distanceTo(playerStartPos);
+
+                if (distanceFromPlayer < MIN_DISTANCE_FROM_PLAYER) {
+                    continue; // Too close to player, try again
+                }
+
                 const origin = new THREE.Vector3(x, y, z);
                 raycaster.set(origin, down);
                 const intersects = raycaster.intersectObjects(worldObjects, true);
@@ -763,7 +773,7 @@ async function spawnSpiders(count: number) {
                     const hasClearance = clearanceIntersects.length === 0;
                     const maxHeight = 15;
 
-                    // Spiders can spawn on steep surfaces - only check water, clearance, and max height
+                    // Spiders can spawn on steep surfaces - only check water, clearance, max height, and distance from player
                     if (!isWater && hasClearance && groundY < maxHeight) {
                         model.position.set(x, groundY, z);
                         validPosition = true;
