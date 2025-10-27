@@ -75,7 +75,6 @@ const WALK_SPEED = 0.6;
 let moveSpeed = RUN_SPEED;
 const rotationSpeed = 0.035;
 const MAX_STEP_HEIGHT = 1;
-const BUMP_DISTANCE = 0;
 const WATER_SINK_DEPTH = -0.4;
 let playerHeight = 1;
 const COLLISION_RADIUS = 0.8;
@@ -911,7 +910,7 @@ function handlePlayerMovement() {
                 .copy(failedMovementVector)
                 .negate()
                 .normalize()
-                .multiplyScalar(BUMP_DISTANCE);
+                .multiplyScalar(hitAnimal ? 1 : 0);
 
             targetPosition.x = originalPosition.x + tempBumpVector.x;
             targetPosition.z = originalPosition.z + tempBumpVector.z;
