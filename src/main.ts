@@ -193,6 +193,20 @@ const particleMaterial = new THREE.MeshBasicMaterial({
     depthWrite: false
 });
 
+/**
+ * Checks if a mesh object is a water surface by examining its material color.
+ * @param object The THREE.Mesh object to check
+ * @returns true if the object is water, false otherwise
+ */
+function isWaterSurface(object: THREE.Object3D): boolean {
+    const mesh = object as THREE.Mesh;
+    if (mesh.material && "color" in mesh.material) {
+        const materialColor = (mesh.material as THREE.MeshStandardMaterial).color;
+        return materialColor.getHex() === 0x00bfd4 || materialColor.getHex() === 0x81dfeb;
+    }
+    return false;
+}
+
 async function loadModel(
     name: string,
 ): Promise<{ model: THREE.Group; animations: THREE.AnimationClip[] }> {
@@ -350,7 +364,7 @@ async function createWorld() {
 }
 
 async function spawnAnimals(count: number) {
-    const areaSize = 300;
+    const areaSize = 250;
     const spawnAttempts = 15; // Increase attempts to find better spots
 
     for (let i = 0; i < count; i++) {
@@ -409,13 +423,7 @@ async function spawnAnimals(count: number) {
                     const minSlopeDot = 0.85; // Roughly 30 degrees max slope
 
                     // Check if it's not water
-                    let isWater = false;
-                    if (hitObject.material && "color" in hitObject.material) {
-                        const materialColor = (hitObject.material as THREE.MeshStandardMaterial).color;
-                        if (materialColor.getHex() === 0x00bfd4 || materialColor.getHex() === 0x81dfeb) {
-                            isWater = true;
-                        }
-                    }
+                    const isWater = isWaterSurface(hitObject);
 
                     // Additional check: make sure there's clearance above (not under a tree canopy)
                     const clearanceHeight = 3.0;
@@ -527,7 +535,7 @@ async function spawnAnimals(count: number) {
 }
 
 async function spawnSpiders(count: number) {
-    const areaSize = 300;
+    const areaSize = 250;
     const spawnAttempts = 15;
 
     for (let i = 0; i < count; i++) {
@@ -563,25 +571,7 @@ async function spawnSpiders(count: number) {
                     const hitPoint = intersects[0].point;
                     const hitObject = intersects[0].object as THREE.Mesh;
 
-                    const face = intersects[0].face;
-                    let surfaceNormal = new THREE.Vector3(0, 1, 0);
-
-                    if (face) {
-                        surfaceNormal = face.normal.clone();
-                        surfaceNormal.transformDirection(hitObject.matrixWorld);
-                    }
-
-                    const upVector = new THREE.Vector3(0, 1, 0);
-                    const slopeDot = surfaceNormal.dot(upVector);
-                    const minSlopeDot = 0.85;
-
-                    let isWater = false;
-                    if (hitObject.material && "color" in hitObject.material) {
-                        const materialColor = (hitObject.material as THREE.MeshStandardMaterial).color;
-                        if (materialColor.getHex() === 0x00bfd4 || materialColor.getHex() === 0x81dfeb) {
-                            isWater = true;
-                        }
-                    }
+                    const isWater = isWaterSurface(hitObject);
 
                     const clearanceHeight = 3.0;
                     const clearanceOrigin = hitPoint.clone();
@@ -595,7 +585,8 @@ async function spawnSpiders(count: number) {
                     const hasClearance = clearanceIntersects.length === 0;
                     const maxHeight = 15;
 
-                    if (!isWater && slopeDot >= minSlopeDot && hasClearance && groundY < maxHeight) {
+                    // Spiders can spawn on steep surfaces - only check water, clearance, and max height
+                    if (!isWater && hasClearance && groundY < maxHeight) {
                         model.position.set(x, groundY, z);
                         validPosition = true;
                     }
@@ -1281,24 +1272,11 @@ function updateSpiderAI(spider: SpiderInstance) {
             if (groundIntersects.length > 0) {
                 const groundY = groundIntersects[0].point.y;
 
-                // Check terrain safety
-                const normal = groundIntersects[0].face?.normal;
-                let isSafe = true;
+                // Spiders can walk on steep surfaces - only check for water
+                const hitObject = groundIntersects[0].object as THREE.Mesh;
+                const isWater = isWaterSurface(hitObject);
 
-                if (normal) {
-                    const worldNormal = normal.clone().applyMatrix3(
-                        new THREE.Matrix3().getNormalMatrix(groundIntersects[0].object.matrixWorld)
-                    ).normalize();
-                    const slopeDot = worldNormal.dot(new THREE.Vector3(0, 1, 0));
-                    isSafe = slopeDot > 0.6;
-                }
-
-                const isWater = groundY < 0.5;
-                if (isWater) {
-                    isSafe = false;
-                }
-
-                if (isSafe) {
+                if (!isWater) {
                     spider.model.position.x = newPosition.x;
                     spider.model.position.z = newPosition.z;
                     spider.model.position.y = groundY;
@@ -1379,23 +1357,11 @@ function updateSpiderAI(spider: SpiderInstance) {
                 if (groundIntersects.length > 0) {
                     const groundY = groundIntersects[0].point.y;
 
-                    const normal = groundIntersects[0].face?.normal;
-                    let isSafe = true;
+                    // Spiders can walk on steep surfaces - only check for water
+                    const hitObject = groundIntersects[0].object as THREE.Mesh;
+                    const isWater = isWaterSurface(hitObject);
 
-                    if (normal) {
-                        const worldNormal = normal.clone().applyMatrix3(
-                            new THREE.Matrix3().getNormalMatrix(groundIntersects[0].object.matrixWorld)
-                        ).normalize();
-                        const slopeDot = worldNormal.dot(new THREE.Vector3(0, 1, 0));
-                        isSafe = slopeDot > 0.6;
-                    }
-
-                    const isWater = groundY < 0.5;
-                    if (isWater) {
-                        isSafe = false;
-                    }
-
-                    if (isSafe) {
+                    if (!isWater) {
                         spider.model.position.x = newPosition.x;
                         spider.model.position.z = newPosition.z;
                         spider.model.position.y = groundY;
@@ -1592,26 +1558,17 @@ function handlePlayerMovement() {
     const intersects = raycaster.intersectObjects(worldObjects, true);
 
     let isWater = false;
+    let groundHeight = 0;
+    let playerHeightOffset = 0;
 
     if (intersects.length > 0) {
         const distanceToGround = intersects[0].distance;
-        const groundHeight = finalOrigin.y - distanceToGround;
+        groundHeight = finalOrigin.y - distanceToGround;
 
         const hitObject = intersects[0].object as THREE.Mesh;
-        if (hitObject.material && "color" in hitObject.material) {
-            const materialColor = (
-                hitObject.material as THREE.MeshStandardMaterial
-            ).color;
+        isWater = isWaterSurface(hitObject);
 
-            if (
-                materialColor.getHex() === 0x00bfd4 ||
-                materialColor.getHex() === 0x81dfeb
-            ) {
-                isWater = true;
-            }
-        }
-
-        const playerHeightOffset = isWater ? WATER_SINK_DEPTH : 0;
+        playerHeightOffset = isWater ? WATER_SINK_DEPTH : 0;
 
         // Handle jumping physics
         if (isJumping) {
