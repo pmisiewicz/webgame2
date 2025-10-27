@@ -75,7 +75,7 @@ const WALK_SPEED = 0.6;
 let moveSpeed = RUN_SPEED;
 const rotationSpeed = 0.035;
 const MAX_STEP_HEIGHT = 1;
-const BUMP_DISTANCE = 2;
+const BUMP_DISTANCE = 1;
 const WATER_SINK_DEPTH = -0.4;
 let playerHeight = 1;
 const COLLISION_RADIUS = 0.8;
@@ -126,7 +126,7 @@ let isJumping = false;
 let jumpVelocity = 0;
 let jumpAnimationPlayed = false;
 const JUMP_FORCE = 10;
-const JUMP_GRAVITY = -25;
+const JUMP_GRAVITY = -20;
 
 const FPS_LIMIT = 60;
 const interval = 1000 / FPS_LIMIT;
@@ -521,7 +521,7 @@ function loadAudio() {
             if (bumpSound) {
                 bumpSound.setBuffer(buffer);
                 bumpSound.setLoop(false);
-                bumpSound.setVolume(0.5);
+                bumpSound.setVolume(0.25);
                 bumpSound.setRefDistance(10);
             }
         },
@@ -785,16 +785,19 @@ function handlePlayerMovement() {
     let moving = false;
     let targetPosition = playerModel.position.clone();
 
+    // Apply jump speed multiplier when jumping
+    const speedMultiplier = isJumping ? 1.5 : 1.0;
+
     if (keys["w"] || keys["W"] || keys["ArrowUp"]) {
         const forwardVector = new THREE.Vector3(0, 0, -0.1);
         forwardVector.applyQuaternion(playerModel.quaternion);
-        targetPosition.addScaledVector(forwardVector, -moveSpeed);
+        targetPosition.addScaledVector(forwardVector, -moveSpeed * speedMultiplier);
         moving = true;
     }
     if (keys["s"] || keys["S"] || keys["ArrowDown"]) {
         const backwardVector = new THREE.Vector3(0, 0, -0.1);
         backwardVector.applyQuaternion(playerModel.quaternion);
-        targetPosition.addScaledVector(backwardVector, moveSpeed);
+        targetPosition.addScaledVector(backwardVector, moveSpeed * speedMultiplier);
         moving = true;
     }
 
@@ -875,33 +878,36 @@ function handlePlayerMovement() {
 
             moving = false;
 
-            if (runAction) runAction.stop();
-            if (walkAction) walkAction.stop();
+            // Only trigger fall animation and controls lock when hitting an animal
+            if (hitAnimal) {
+                if (runAction) runAction.stop();
+                if (walkAction) walkAction.stop();
 
-            if (fallAction) {
-                fallAction.reset().play();
+                if (fallAction) {
+                    fallAction.reset().play();
 
-                controlsLocked = true;
-                setTimeout(() => {
-                    controlsLocked = false;
-                }, 1000);
+                    controlsLocked = true;
+                    setTimeout(() => {
+                        controlsLocked = false;
+                    }, 1000);
 
-                // Only play bump sound for walls/obstacles, not for animals
-                if (!hitAnimal && bumpSound && !bumpSound.isPlaying) {
-                    bumpSound.play();
+                    if (runningSound && runningSound.isPlaying) runningSound.stop();
+                    if (waterSound && waterSound.isPlaying) waterSound.stop();
                 }
 
-                if (runningSound && runningSound.isPlaying) runningSound.stop();
-                if (waterSound && waterSound.isPlaying) waterSound.stop();
-            }
+                // Trigger animal death animation
+                if (collidedAnimal) {
+                    playAnimalDeathAnimation(collidedAnimal);
 
-            // Trigger animal death animation if we hit an animal
-            if (hitAnimal && collidedAnimal) {
-                playAnimalDeathAnimation(collidedAnimal);
-
-                // Play animal hit sound (without bump sound)
-                if (animalHitSound && !animalHitSound.isPlaying) {
-                    animalHitSound.play();
+                    // Play animal hit sound
+                    if (animalHitSound && !animalHitSound.isPlaying) {
+                        animalHitSound.play();
+                    }
+                }
+            } else {
+                // For walls/obstacles, just play bump sound - no fall animation or controls lock
+                if (bumpSound && !bumpSound.isPlaying) {
+                    bumpSound.play();
                 }
             }
         }
