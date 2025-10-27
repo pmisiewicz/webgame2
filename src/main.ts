@@ -215,7 +215,6 @@ function createCloud(): THREE.Group {
             Math.random() * 4 - 2,
         );
 
-        sphere.castShadow = true;
         cloud.add(sphere);
     }
 
@@ -236,7 +235,7 @@ function createClouds() {
 
         const cloud = createCloud();
 
-        const scaleFactor = Math.random() * 1 + 1;
+        const scaleFactor = Math.random() + 1;
         cloud.scale.setScalar(scaleFactor);
 
         // Set the final position of the entire cloud group
@@ -249,7 +248,7 @@ function createClouds() {
 
 // FIX: Improved type guard to correctly check for Mesh properties
 function isMesh(child: THREE.Object3D): child is THREE.Mesh {
-    return (child as THREE.Mesh).isMesh === true && 'geometry' in child;
+    return (child as THREE.Mesh).isMesh && 'geometry' in child;
 }
 
 async function createWorld() {
@@ -404,19 +403,19 @@ async function createPlayer() {
 
             if (mixer) {
                 mixer.addEventListener("finished", (e) => {
-                    if (e.action === fallAction) {
+                    if (fallAction && e.action === fallAction) {
                         // Once the fall action is done, make it instantly stop holding the pose
                         fallAction.stop();
                     }
                 });
             }
         } else {
-            console.warn("Model Steve.glb nie zawiera animacji.");
+            console.warn("Model 'Animated Platformer Character.glb' nie zawiera animacji.");
         }
 
         updateCameraPosition(true);
     } catch (err) {
-        console.warn("Błąd ładowania modelu Steve.glb:", err);
+        console.warn("Błąd ładowania modelu 'Animated Platformer Character.glb':", err);
     }
 }
 
@@ -468,7 +467,10 @@ function updateSplashes(delta: number) {
 
         if (particle.age > particle.maxAge) {
             scene.remove(particle.mesh);
-            // In a real application, we would dispose of geometry/material here for memory
+            // Dispose of material to prevent memory leak
+            if (particle.mesh.material instanceof THREE.Material) {
+                particle.mesh.material.dispose();
+            }
             particleData.splice(i, 1);
             continue;
         }
