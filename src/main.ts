@@ -7,6 +7,7 @@ import waterSoundUrl from "/src/sfx/walking-in-water-199418.mp3";
 import bumpSoundUrl from "/src/sfx/boing2-418548.mp3";
 import forestAtmosphereUrl from "/src/sfx/forest-atmosphere-001localization-poland-329745.mp3";
 import animalHitSoundUrl from "/src/sfx/small-monster-attack-195712.mp3";
+import waterSplashSoundUrl from "/src/sfx/water-splash-02-352021.mp3";
 
 const scene = new THREE.Scene();
 const skyColor = 0x87ceeb;
@@ -68,6 +69,7 @@ let waterSound: THREE.PositionalAudio | null = null;
 let bumpSound: THREE.PositionalAudio | null = null;
 let backgroundMusic: THREE.Audio | null = null;
 let animalHitSound: THREE.PositionalAudio | null = null;
+let waterSplashSound: THREE.PositionalAudio | null = null;
 
 let playerModel: THREE.Group | null = null;
 const RUN_SPEED = 1.2;
@@ -154,6 +156,7 @@ const clock = new THREE.Clock();
 let isJumping = false;
 let jumpVelocity = 0;
 let jumpAnimationPlayed = false;
+let wasJumping = false; // Track if player was jumping in previous frame
 const JUMP_FORCE = 10;
 const JUMP_GRAVITY = -30;
 const MAX_JUMPS = 2;
@@ -174,6 +177,10 @@ const SPLASH_LIFESPAN = 1;
 const SPLASH_COLOR = 0x6FBFC9;
 const SPLASH_EMISSION_RATE = 0.15;
 let lastSplashTime = 0;
+
+const BIG_SPLASH_PARTICLE_COUNT = 150;
+const BIG_SPLASH_SPREAD = 1.5;
+const BIG_SPLASH_VELOCITY_MULTIPLIER = 2.5;
 
 const GRAVITY = -9.8 * 0.5;
 
@@ -909,6 +916,25 @@ function loadAudio() {
         },
     );
     playerModel.add(animalHitSound);
+
+    // Load water splash sound
+    waterSplashSound = new THREE.PositionalAudio(listener);
+    audioLoader.load(
+        waterSplashSoundUrl,
+        function (buffer) {
+            if (waterSplashSound) {
+                waterSplashSound.setBuffer(buffer);
+                waterSplashSound.setLoop(false);
+                waterSplashSound.setVolume(0.75);
+                waterSplashSound.setRefDistance(15);
+            }
+        },
+        undefined,
+        (err) => {
+            console.error("Error loading water splash sound:", err);
+        },
+    );
+    playerModel.add(waterSplashSound);
 }
 
 async function createPlayer() {
@@ -1035,6 +1061,44 @@ function spawnSplash(position: THREE.Vector3) {
             velocity,
             age: 0,
             maxAge: SPLASH_LIFESPAN,
+        });
+    }
+}
+
+/**
+ * Creates a large dramatic splash effect for landing in water.
+ * @param position The position to spawn the big splash
+ */
+function spawnBigSplash(position: THREE.Vector3) {
+    for (let i = 0; i < BIG_SPLASH_PARTICLE_COUNT; i++) {
+        const material = particleMaterial.clone();
+        const mesh = new THREE.Mesh(particleGeometry, material);
+
+        const initialPosition = position.clone();
+        initialPosition.y += 0.3;
+        initialPosition.x += (Math.random() - 0.5) * BIG_SPLASH_SPREAD;
+        initialPosition.z += (Math.random() - 0.5) * BIG_SPLASH_SPREAD;
+        mesh.position.copy(initialPosition);
+
+        // Larger, more varied velocities for dramatic effect
+        const angle = Math.random() * Math.PI * 2;
+        const speed = Math.random() * 0.8 + 0.4; // 0.4 to 1.2
+        const velX = Math.cos(angle) * speed * BIG_SPLASH_VELOCITY_MULTIPLIER;
+        const velY = Math.random() * 2.5 + 1.5; // 1.5 to 4.0 (higher than normal splash)
+        const velZ = Math.sin(angle) * speed * BIG_SPLASH_VELOCITY_MULTIPLIER;
+        const velocity = new THREE.Vector3(velX, velY, velZ);
+
+        // Vary particle size for more realistic effect
+        const scale = Math.random() * 0.5 + 0.8; // 0.8 to 1.3
+        mesh.scale.setScalar(scale);
+
+        scene.add(mesh);
+
+        particleData.push({
+            mesh,
+            velocity,
+            age: 0,
+            maxAge: SPLASH_LIFESPAN * 1.2, // Big splash particles last slightly longer
         });
     }
 }
@@ -1584,6 +1648,19 @@ function handlePlayerMovement() {
             // Check if landed on ground
             if (playerModel.position.y <= groundHeight + playerHeightOffset) {
                 playerModel.position.y = groundHeight + playerHeightOffset;
+
+                // Check if landing in water - spawn big splash and play sound
+                if (isWater && wasJumping) {
+                    spawnBigSplash(playerModel.position);
+
+                    // Play water splash sound
+
+                    if (waterSplashSound) {
+                        waterSplashSound.stop();
+                        waterSplashSound.play();
+                    }
+                }
+
                 isJumping = false;
                 jumpVelocity = 0;
                 jumpAnimationPlayed = false;
@@ -1594,9 +1671,11 @@ function handlePlayerMovement() {
                     jumpAction.stop();
                 }
             }
+            wasJumping = true; // Track that we were jumping
         } else {
             playerModel.position.y = groundHeight + playerHeightOffset;
             jumpsRemaining = MAX_JUMPS; // Reset double jump when on ground
+            wasJumping = false; // Not jumping anymore
         }
     } else {
         if (playerModel.position.y > 0) {
