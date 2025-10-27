@@ -207,6 +207,62 @@ function isWaterSurface(object: THREE.Object3D): boolean {
     return false;
 }
 
+/**
+ * Gets the ground height at a given position using raycasting.
+ * @param position The position to check
+ * @param raycastHeight The height to start the raycast from (default: 10)
+ * @returns Object containing groundY and hitObject, or null if no ground found
+ */
+function getGroundHeight(position: THREE.Vector3, raycastHeight: number = 10): { groundY: number; hitObject: THREE.Mesh } | null {
+    const groundCheckOrigin = position.clone();
+    groundCheckOrigin.y += raycastHeight;
+    const downVector = new THREE.Vector3(0, -1, 0);
+
+    raycaster.set(groundCheckOrigin, downVector);
+    const groundIntersects = raycaster.intersectObjects(worldObjects, true);
+
+    if (groundIntersects.length > 0) {
+        return {
+            groundY: groundIntersects[0].point.y,
+            hitObject: groundIntersects[0].object as THREE.Mesh
+        };
+    }
+    return null;
+}
+
+/**
+ * Stops all player movement animations and sounds.
+ */
+function stopPlayerActions(): void {
+    // Stop all animations
+    if (runAction && runAction.isRunning()) runAction.stop();
+    if (walkAction && walkAction.isRunning()) walkAction.stop();
+    if (jumpAction && jumpAction.isRunning()) jumpAction.stop();
+
+    // Stop all movement sounds
+    if (runningSound && runningSound.isPlaying) runningSound.stop();
+    if (waterSound && waterSound.isPlaying) waterSound.stop();
+}
+
+/**
+ * Triggers the player fall animation and temporarily locks controls.
+ * @param lockDuration Duration to lock controls in milliseconds (default: 1000)
+ */
+function triggerPlayerFall(lockDuration: number = 1000): void {
+    stopPlayerActions();
+
+    // Play fall animation
+    if (fallAction) {
+        fallAction.reset().play();
+    }
+
+    // Lock controls temporarily
+    controlsLocked = true;
+    setTimeout(() => {
+        controlsLocked = false;
+    }, lockDuration);
+}
+
 async function loadModel(
     name: string,
 ): Promise<{ model: THREE.Group; animations: THREE.AnimationClip[] }> {
@@ -739,18 +795,12 @@ function updateSpiderJumpBack(spider: SpiderInstance) {
     const currentPos = spider.jumpBackStartPos.clone().lerp(spider.jumpBackEndPos, easeProgress);
 
     // Check ground height at current position
-    const groundCheckOrigin = currentPos.clone();
-    groundCheckOrigin.y += 10;
-    const downVector = new THREE.Vector3(0, -1, 0);
+    const groundResult = getGroundHeight(currentPos);
 
-    raycaster.set(groundCheckOrigin, downVector);
-    const groundIntersects = raycaster.intersectObjects(worldObjects, true);
-
-    if (groundIntersects.length > 0) {
-        const groundY = groundIntersects[0].point.y;
+    if (groundResult) {
         spider.model.position.x = currentPos.x;
         spider.model.position.z = currentPos.z;
-        spider.model.position.y = groundY;
+        spider.model.position.y = groundResult.groundY;
     }
 
     // Jump back complete
@@ -1153,7 +1203,7 @@ function updateAnimalMovement(animalInstance: AnimalInstance) {
         const moveVector = forward.multiplyScalar(animalInstance.moveSpeed * 0.016 * 60); // Normalize to ~60fps
         const newPosition = animal.position.clone().add(moveVector);
 
-        // Check ground height at new position
+        // Check ground height at new position - need to do full raycast for normal data
         const groundCheckOrigin = newPosition.clone();
         groundCheckOrigin.y += 10;
         const downVector = new THREE.Vector3(0, -1, 0);
@@ -1163,21 +1213,23 @@ function updateAnimalMovement(animalInstance: AnimalInstance) {
 
         if (groundIntersects.length > 0) {
             const groundY = groundIntersects[0].point.y;
+            const hitObject = groundIntersects[0].object as THREE.Mesh;
 
             // Check if terrain is not too steep and not water
-            const normal = groundIntersects[0].face?.normal;
+            const face = groundIntersects[0].face;
             let isSafe = true;
 
-            if (normal) {
-                const worldNormal = normal.clone().applyMatrix3(
-                    new THREE.Matrix3().getNormalMatrix(groundIntersects[0].object.matrixWorld)
+            // Check slope if we have face normal data
+            if (face) {
+                const worldNormal = face.normal.clone().applyMatrix3(
+                    new THREE.Matrix3().getNormalMatrix(hitObject.matrixWorld)
                 ).normalize();
                 const slopeDot = worldNormal.dot(new THREE.Vector3(0, 1, 0));
                 isSafe = slopeDot > 0.6; // Not too steep
             }
 
-            // Check if it's water (low elevation)
-            const isWater = groundY < 0.5;
+            // Check if it's water
+            const isWater = isWaterSurface(hitObject);
             if (isWater) {
                 isSafe = false;
             }
@@ -1229,24 +1281,7 @@ function updateSpiderAI(spider: SpiderInstance) {
             // Spider is close enough to attack - trigger it
             if (!spider.isAttacking && !spider.isJumpingBack && playerModel && !controlsLocked) {
                 // Make player fall
-                if (runAction && runAction.isRunning()) runAction.stop();
-                if (walkAction && walkAction.isRunning()) walkAction.stop();
-                if (jumpAction && jumpAction.isRunning()) jumpAction.stop();
-
-                // Stop all movement sounds
-                if (runningSound && runningSound.isPlaying) runningSound.stop();
-                if (waterSound && waterSound.isPlaying) waterSound.stop();
-
-                // Play fall animation
-                if (fallAction) {
-                    fallAction.reset().play();
-                }
-
-                // Lock controls temporarily
-                controlsLocked = true;
-                setTimeout(() => {
-                    controlsLocked = false;
-                }, 1000);
+                triggerPlayerFall();
 
                 // Trigger spider attack animation and jump back
                 triggerSpiderAttack(spider);
@@ -1262,18 +1297,12 @@ function updateSpiderAI(spider: SpiderInstance) {
             const newPosition = spiderPos.clone().add(moveVector);
 
             // Check ground height at new position
-            const groundCheckOrigin = newPosition.clone();
-            groundCheckOrigin.y += 10;
-            const downVector = new THREE.Vector3(0, -1, 0);
+            const groundResult = getGroundHeight(newPosition);
 
-            raycaster.set(groundCheckOrigin, downVector);
-            const groundIntersects = raycaster.intersectObjects(worldObjects, true);
-
-            if (groundIntersects.length > 0) {
-                const groundY = groundIntersects[0].point.y;
+            if (groundResult) {
+                const { groundY, hitObject } = groundResult;
 
                 // Spiders can walk on steep surfaces - only check for water
-                const hitObject = groundIntersects[0].object as THREE.Mesh;
                 const isWater = isWaterSurface(hitObject);
 
                 if (!isWater) {
@@ -1347,18 +1376,12 @@ function updateSpiderAI(spider: SpiderInstance) {
                 spider.model.rotation.y += Math.PI / 4;
             } else {
                 // Check ground height
-                const groundCheckOrigin = newPosition.clone();
-                groundCheckOrigin.y += 10;
-                const downVector = new THREE.Vector3(0, -1, 0);
+                const groundResult = getGroundHeight(newPosition);
 
-                raycaster.set(groundCheckOrigin, downVector);
-                const groundIntersects = raycaster.intersectObjects(worldObjects, true);
-
-                if (groundIntersects.length > 0) {
-                    const groundY = groundIntersects[0].point.y;
+                if (groundResult) {
+                    const { groundY, hitObject } = groundResult;
 
                     // Spiders can walk on steep surfaces - only check for water
-                    const hitObject = groundIntersects[0].object as THREE.Mesh;
                     const isWater = isWaterSurface(hitObject);
 
                     if (!isWater) {
@@ -1498,25 +1521,8 @@ function handlePlayerMovement() {
 
             // Handle spider collision - player falls
             if (hitSpider) {
-                // Stop all player actions
-                if (runAction && runAction.isRunning()) runAction.stop();
-                if (walkAction && walkAction.isRunning()) walkAction.stop();
-                if (jumpAction && jumpAction.isRunning()) jumpAction.stop();
-
-                // Stop all movement sounds
-                if (runningSound && runningSound.isPlaying) runningSound.stop();
-                if (waterSound && waterSound.isPlaying) waterSound.stop();
-
-                // Play fall animation
-                if (fallAction) {
-                    fallAction.reset().play();
-                }
-
-                // Lock controls temporarily
-                controlsLocked = true;
-                setTimeout(() => {
-                    controlsLocked = false;
-                }, 1000);
+                // Make player fall
+                triggerPlayerFall();
 
                 // Trigger spider attack animation and jump back
                 if (collidedSpider) {
