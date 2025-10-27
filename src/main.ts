@@ -34,6 +34,57 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
 document.body.appendChild(renderer.domElement);
 
+// Minimap setup - 3D renderer with top-down view
+const MINIMAP_SIZE = 200;
+const minimapRenderer = new THREE.WebGLRenderer({antialias: true, alpha: true});
+minimapRenderer.setSize(MINIMAP_SIZE, MINIMAP_SIZE);
+minimapRenderer.domElement.style.position = 'absolute';
+minimapRenderer.domElement.style.bottom = '20px';
+minimapRenderer.domElement.style.right = '20px';
+minimapRenderer.domElement.style.border = '3px solid #333';
+minimapRenderer.domElement.style.borderRadius = '10px';
+minimapRenderer.domElement.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+minimapRenderer.domElement.style.zIndex = '1000';
+document.body.appendChild(minimapRenderer.domElement);
+
+// Minimap scene and camera
+const minimapScene = new THREE.Scene();
+minimapScene.background = new THREE.Color(0x87ceeb); // Sky blue background
+
+const minimapCamera = new THREE.OrthographicCamera(
+    -75, 75,  // left, right
+    75, -75,  // top, bottom
+    1, 500
+);
+minimapCamera.position.set(0, 200, 0); // High top-down view
+minimapCamera.lookAt(0, 0, 0);
+
+// Minimap lighting
+const minimapLight = new THREE.DirectionalLight(0xffffff, 1);
+minimapLight.position.set(0, 50, 0);
+minimapScene.add(minimapLight);
+const minimapAmbient = new THREE.AmbientLight(0xffffff, 0.2);
+minimapScene.add(minimapAmbient);
+
+// References for minimap entities
+let minimapWorldModel: THREE.Group | null = null;
+
+// Player marker - just a white arrow pointing forward
+const minimapPlayerArrow = new THREE.Mesh(
+    new THREE.ConeGeometry(3, 8, 8),
+    new THREE.MeshBasicMaterial({ color: 0xffffff })
+);
+minimapPlayerArrow.rotation.x = Math.PI / 2; // Point the cone forward
+
+// Wrap arrow in a group so we can rotate on Y axis properly
+const minimapPlayerMarker = new THREE.Group();
+minimapPlayerMarker.add(minimapPlayerArrow);
+minimapPlayerMarker.position.y = 50; // High above terrain
+minimapScene.add(minimapPlayerMarker);
+
+// Spider markers (no animal markers)
+const minimapSpiderMarkers: THREE.Mesh[] = [];
+
 const hemiLight = new THREE.HemisphereLight(0xffffff, 0xdddddd, 1.2);
 hemiLight.position.set(0, 100, 0);
 scene.add(hemiLight);
@@ -270,6 +321,63 @@ function triggerPlayerFall(lockDuration: number = 1000): void {
     }, lockDuration);
 }
 
+/**
+ * Updates minimap entity positions and renders the 3D minimap view.
+ */
+function updateAndRenderMinimap(): void {
+    if (!playerModel) return;
+
+    // Update player marker position and rotation
+    minimapPlayerMarker.position.x = playerModel.position.x;
+    minimapPlayerMarker.position.z = playerModel.position.z;
+    minimapPlayerMarker.rotation.y = playerModel.rotation.y;
+
+    // Update camera to follow player - position camera high and look at marker level
+    minimapCamera.position.x = playerModel.position.x;
+    minimapCamera.position.y = 200;
+    minimapCamera.position.z = playerModel.position.z;
+    minimapCamera.lookAt(playerModel.position.x, 50, playerModel.position.z);
+
+    // Update spider markers - visible but not too large
+    for (let i = 0; i < spiders.length; i++) {
+        if (i >= minimapSpiderMarkers.length) {
+            // Create new spider marker - red sphere with ring
+            const marker = new THREE.Mesh(
+                new THREE.SphereGeometry(2, 16, 16),
+                new THREE.MeshBasicMaterial({
+                    color: 0xff0000,
+                    transparent: true,
+                    opacity: 0.9
+                })
+            );
+
+            // Add glowing ring around spider
+            const ring = new THREE.Mesh(
+                new THREE.RingGeometry(2, 3, 16),
+                new THREE.MeshBasicMaterial({
+                    color: 0xffff00,
+                    side: THREE.DoubleSide,
+                    transparent: true,
+                    opacity: 0.7
+                })
+            );
+            ring.rotation.x = -Math.PI / 2;
+            marker.add(ring);
+
+            minimapSpiderMarkers.push(marker);
+            minimapScene.add(marker);
+        }
+        const spider = spiders[i];
+        const marker = minimapSpiderMarkers[i];
+        marker.position.x = spider.model.position.x;
+        marker.position.y = 50; // Same height as player marker
+        marker.position.z = spider.model.position.z;
+    }
+
+    // Render minimap
+    minimapRenderer.render(minimapScene, minimapCamera);
+}
+
 async function loadModel(
     name: string,
 ): Promise<{ model: THREE.Group; animations: THREE.AnimationClip[] }> {
@@ -419,6 +527,13 @@ async function createWorld() {
         });
 
         scene.add(model);
+
+        // Clone the world model for minimap
+        minimapWorldModel = model.clone();
+        minimapWorldModel.scale.setScalar(50);
+        minimapWorldModel.position.set(0, 10, 0);
+        minimapScene.add(minimapWorldModel);
+
         incrementLoadingProgress('World Loaded');
     } catch (err) {
         console.warn("Błąd ładowania modelu Nature.glb:", err);
@@ -2013,6 +2128,9 @@ function animate() {
 
             dirLight.target.updateMatrixWorld();
         }
+
+        // Update and render minimap
+        updateAndRenderMinimap();
 
         renderer.render(scene, camera);
     }
