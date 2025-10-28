@@ -1,0 +1,24 @@
+"Gallop" for Fox.gltf
+"Idle_HitReact1" for Deer.gltf
+"Death" for Stag.gltf
+"Eating" for Horse_White.gltf
+"Attack_Headbutt" for Alpaca.gltf
+"Gallop" for ShibaInu.gltf
+"Idle_HitReact2" for Fox.gltf
+"Death" for Fox.gltf
+"Idle_2" for Wolf.gltf
+"Idle" for Horse_White.gltf
+"Attack_Headbutt" for Stag.gltf
+"Attack_Headbutt" for Horse_White.gltf
+"Gallop" for Wolf.gltf
+"Idle_HitReact1" for ShibaInu.gltf
+"Idle_HitReact1" for Alpaca.gltf
+"Idle_2" for Fox.gltf
+"Walk" for Fox.gltf
+ "Idle_HitReact2" for Husky.gltf
+"Idle_2_HeadLow" for Fox.gltf
+"Walk" for Husky.gltf
+"Gallop" for Alpaca.gltf
+"Gallop_Jump" for Horse_White.gltf
+"Walk" for Fox.gltf
+"Idle_2" for Stag.gltf
