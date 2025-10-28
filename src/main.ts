@@ -1022,7 +1022,7 @@ function updateSpiderJumpBack(spider: SpiderInstance) {
 const crystals: THREE.Group[] = [];
 
 async function spawnCrystals(count: number) {
-    const areaSize = 250;
+    const areaSize = 220;
     const spawnAttempts = 1000;
     const MIN_DISTANCE_FROM_PLAYER = 20; // Minimum distance from player spawn point
     const playerStartPos = new THREE.Vector3(5, 7, 8);
@@ -1095,7 +1095,7 @@ async function spawnCrystals(count: number) {
                     const minSlopeDot = 0.85; // Roughly 30 degrees max slope
 
                     // Accept position if: not water, not too steep, has clearance, height is accessible
-                    if (!isWater && slopeDot >= minSlopeDot && hasClearance) {
+                    if (!isWater && slopeDot >= minSlopeDot && hasClearance && groundY < 8) {
                         model.position.set(x, groundY, z);
                         validPosition = true;
                     }
