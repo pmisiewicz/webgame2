@@ -453,7 +453,7 @@ async function loadModel(
 ): Promise<{ model: THREE.Group; animations: THREE.AnimationClip[] }> {
     return new Promise((resolve, reject) => {
         loader.load(
-            `/src/models/${name}`,
+            `/models/${name}`,
             (gltf: GLTF) => {
                 const model = gltf.scene;
                 model.traverse((child: THREE.Object3D) => {
