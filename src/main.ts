@@ -8,6 +8,7 @@ import bumpSoundUrl from "/src/sfx/boing2-418548.mp3";
 import forestAtmosphereUrl from "/src/sfx/forest-atmosphere-001localization-poland-329745.mp3";
 import animalHitSoundUrl from "/src/sfx/small-monster-attack-195712.mp3";
 import waterSplashSoundUrl from "/src/sfx/water-splash-02-352021.mp3";
+import successSoundUrl from "/src/sfx/success-340660.mp3";
 
 const scene = new THREE.Scene();
 const skyColor = 0x87ceeb;
@@ -124,6 +125,7 @@ let bumpSound: THREE.PositionalAudio | null = null;
 let backgroundMusic: THREE.Audio | null = null;
 let animalHitSound: THREE.PositionalAudio | null = null;
 let waterSplashSound: THREE.PositionalAudio | null = null;
+let successSound: THREE.Audio | null = null;
 
 let playerModel: THREE.Group | null = null;
 const RUN_SPEED = 1.2;
@@ -235,6 +237,11 @@ let lastSplashTime = 0;
 const BIG_SPLASH_PARTICLE_COUNT = 150;
 const BIG_SPLASH_SPREAD = 1.5;
 const BIG_SPLASH_VELOCITY_MULTIPLIER = 2.5;
+
+const CRYSTAL_PARTICLE_COUNT = 30;
+const CRYSTAL_LIFESPAN = 0.8;
+const CRYSTAL_PARTICLE_SPEED = 5;
+const CRYSTAL_COLLECT_RADIUS = 1.5;
 
 const GRAVITY = -9.8 * 0.5;
 
@@ -1228,6 +1235,22 @@ function loadAudio() {
         },
     );
     playerModel.add(waterSplashSound);
+
+    successSound = new THREE.Audio(listener);
+    audioLoader.load(
+        successSoundUrl,
+        function (buffer) {
+            if (successSound) {
+                successSound.setBuffer(buffer);
+                successSound.setLoop(false);
+                successSound.setVolume(0.8);
+            }
+        },
+        undefined,
+        (err) => {
+            console.error("Error loading success sound:", err);
+        },
+    );
 }
 
 async function createPlayer() {
@@ -1392,6 +1415,43 @@ function spawnBigSplash(position: THREE.Vector3) {
             velocity,
             age: 0,
             maxAge: SPLASH_LIFESPAN * 1.2, // Big splash particles last slightly longer
+        });
+    }
+}
+
+function spawnCrystalCollectEffect(position: THREE.Vector3, color: THREE.Color) {
+    for (let i = 0; i < CRYSTAL_PARTICLE_COUNT; i++) {
+        // Clone the base particle material and set the crystal's color
+        const material = particleMaterial.clone() as THREE.MeshBasicMaterial;
+        material.color.set(color);
+        material.opacity = 1;
+
+        const mesh = new THREE.Mesh(particleGeometry, material);
+
+        // Start at the crystal's position
+        const initialPosition = position.clone();
+        initialPosition.y += 0.5; // Start slightly above ground
+        mesh.position.copy(initialPosition);
+
+        // Random outward and upward velocity
+        const angle = Math.random() * Math.PI * 2;
+        const horizontalSpeed = Math.random() * 0.5 + 0.5; // 0.5 to 1.0
+        const velX = Math.cos(angle) * horizontalSpeed * CRYSTAL_PARTICLE_SPEED;
+        const velY = (Math.random() * 0.5 + 0.5) * CRYSTAL_PARTICLE_SPEED; // Upward burst
+        const velZ = Math.sin(angle) * horizontalSpeed * CRYSTAL_PARTICLE_SPEED;
+        const velocity = new THREE.Vector3(velX, velY, velZ);
+
+        // Use a slightly smaller particle size
+        const scale = Math.random() * 0.3 + 0.5; // 0.5 to 0.8
+        mesh.scale.setScalar(scale);
+
+        scene.add(mesh);
+
+        particleData.push({
+            mesh,
+            velocity,
+            age: 0,
+            maxAge: CRYSTAL_LIFESPAN * (Math.random() * 0.3 + 0.8), // Vary lifespan
         });
     }
 }
@@ -2107,6 +2167,79 @@ function handlePlayerMovement() {
     }
 }
 
+function checkCrystalCollection() {
+    if (!playerModel) return;
+
+    const playerPos = playerModel.position;
+
+    // Iterate backwards so we can safely remove items from the arrays
+    for (let i = crystals.length - 1; i >= 0; i--) {
+        const crystal = crystals[i];
+        const crystalPos = crystal.position;
+
+        const distance = playerPos.distanceTo(crystalPos);
+
+        if (distance < CRYSTAL_COLLECT_RADIUS) {
+            // --- Player collected the crystal! ---
+
+            // 1. Get crystal color for the effect
+            let crystalColor = new THREE.Color(0x00aaff); // Default color
+            crystal.traverse((child) => {
+                if ((child as THREE.Mesh).isMesh) {
+                    const material = (child as THREE.Mesh).material as THREE.MeshStandardMaterial;
+                    if (material && material.emissive) {
+                        crystalColor.copy(material.emissive);
+                    }
+                }
+            });
+
+            if (successSound) {
+                successSound.stop();
+                successSound.play();
+            }
+
+            // 3. Spawn particle effect
+            spawnCrystalCollectEffect(crystalPos, crystalColor);
+
+            // 4. Remove crystal from scene and dispose of its assets
+            scene.remove(crystal);
+            crystal.traverse((child) => {
+                if ((child as THREE.Mesh).isMesh) {
+                    (child as THREE.Mesh).geometry?.dispose();
+                    const material = (child as THREE.Mesh).material;
+                    if (material) {
+                        Array.isArray(material)
+                            ? material.forEach(mat => mat.dispose())
+                            : material.dispose();
+                    }
+                }
+            });
+
+            // 5. Remove crystal from logic array
+            crystals.splice(i, 1);
+
+            // 6. Remove crystal marker from minimap and dispose
+            const marker = minimapCrystalMarkers[i];
+            if (marker) {
+                minimapScene.remove(marker);
+                // Dispose marker geometry and materials
+                marker.traverse((child) => {
+                    if ((child as THREE.Mesh).isMesh) {
+                        (child as THREE.Mesh).geometry?.dispose();
+                        const material = (child as THREE.Mesh).material;
+                        if (material) {
+                            Array.isArray(material)
+                                ? material.forEach(mat => mat.dispose())
+                                : material.dispose();
+                        }
+                    }
+                });
+                minimapCrystalMarkers.splice(i, 1);
+            }
+        }
+    }
+}
+
 function updateCameraPosition(instant: boolean = false) {
     if (!playerModel) return;
 
@@ -2286,6 +2419,7 @@ function animate() {
         }
 
         handlePlayerMovement();
+        checkCrystalCollection();
         updateSplashes(delta);
 
         updateCameraPosition();
