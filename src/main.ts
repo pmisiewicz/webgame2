@@ -89,6 +89,20 @@ const minimapSpiderMarkers: THREE.Mesh[] = [];
 // Crystal markers
 const minimapCrystalMarkers: THREE.Mesh[] = [];
 
+// --- Crystal Collected UI (Top Right) ---
+const TOTAL_CRYSTALS = 10; // Must match spawnCrystals() count
+const UI_CRYSTAL_SIZE = 50; // This is the HEIGHT of the renderer
+const UI_CRYSTAL_CAM_HEIGHT = 3.0; // Vertical units visible in UI camera
+const UI_CRYSTAL_SCALE = 0.3; // Scale of crystal models in the UI
+
+let uiCrystalRenderer: THREE.WebGLRenderer | null = null;
+let uiCrystalScene: THREE.Scene | null = null;
+let uiCrystalCamera: THREE.OrthographicCamera | null = null; // Changed to Orthographic
+let uiCrystalTemplate: THREE.Group | null = null; // This is the template we will clone
+const uiCrystalModels: THREE.Group[] = []; // Array to hold collected crystal models
+let uiCrystalCountElement: HTMLElement | null = null;
+let collectedCrystals = 0;
+
 const hemiLight = new THREE.HemisphereLight(0xffffff, 0xdddddd, 1.2);
 hemiLight.position.set(0, 100, 0);
 scene.add(hemiLight);
@@ -317,6 +331,9 @@ function stopPlayerActions(): void {
  * @param lockDuration Duration to lock controls in milliseconds (default: 1000)
  */
 function triggerPlayerFall(lockDuration: number = 1000): void {
+    // Don't trigger fall if game is already won/controls permanently locked
+    if (controlsLocked && jumpsRemaining === 0) return;
+
     stopPlayerActions();
 
     // Play fall animation
@@ -328,6 +345,10 @@ function triggerPlayerFall(lockDuration: number = 1000): void {
     controlsLocked = true;
     setTimeout(() => {
         controlsLocked = false;
+        // Check if the game-win lock is also active
+        if (collectedCrystals === TOTAL_CRYSTALS) {
+            controlsLocked = true;
+        }
     }, lockDuration);
 }
 
@@ -1002,9 +1023,9 @@ const crystals: THREE.Group[] = [];
 
 async function spawnCrystals(count: number) {
     const areaSize = 250;
-    const spawnAttempts = 20;
+    const spawnAttempts = 1000;
     const MIN_DISTANCE_FROM_PLAYER = 20; // Minimum distance from player spawn point
-    const playerStartPos = new THREE.Vector3(5, 0, 8);
+    const playerStartPos = new THREE.Vector3(5, 7, 8);
 
     for (let i = 0; i < count; i++) {
         try {
@@ -1121,6 +1142,20 @@ async function spawnCrystals(count: number) {
     }
 
     console.log(`Spawned ${crystals.length} crystals on the map`);
+}
+
+/**
+ * Loads the crystal model for the UI template.
+ */
+async function loadUICrystalTemplate() {
+    incrementLoadingProgress('Loading UI...');
+    try {
+        const {model} = await loadModel("Crystal.glb");
+        uiCrystalTemplate = model;
+        uiCrystalTemplate.scale.setScalar(UI_CRYSTAL_SCALE); // Scale it down for the UI
+    } catch (err) {
+        console.warn("Failed to load UI crystal template:", err);
+    }
 }
 
 function loadAudio() {
@@ -1818,11 +1853,14 @@ function handlePlayerMovement() {
     if (!playerModel) return;
 
     if (controlsLocked) {
-        if (keys["a"] || keys["A"] || keys["ArrowLeft"]) {
-            playerModel.rotation.y += rotationSpeed;
-        }
-        if (keys["d"] || keys["D"] || keys["ArrowRight"]) {
-            playerModel.rotation.y -= rotationSpeed;
+        // Allow rotation only if it's the temporary fall lock, not the permanent game-win lock
+        if (collectedCrystals < TOTAL_CRYSTALS) {
+            if (keys["a"] || keys["A"] || keys["ArrowLeft"]) {
+                playerModel.rotation.y += rotationSpeed;
+            }
+            if (keys["d"] || keys["D"] || keys["ArrowRight"]) {
+                playerModel.rotation.y -= rotationSpeed;
+            }
         }
         return;
     }
@@ -2167,6 +2205,43 @@ function handlePlayerMovement() {
     }
 }
 
+/**
+ * Displays a win screen and locks the game.
+ */
+function showWinScreen() {
+    controlsLocked = true;
+    stopPlayerActions();
+
+    if (backgroundMusic && backgroundMusic.isPlaying) {
+        backgroundMusic.stop();
+    }
+    if (successSound) {
+        successSound.stop();
+        successSound.play();
+    }
+
+    const winScreen = document.createElement('div');
+    winScreen.id = 'win-screen';
+    winScreen.style.position = 'absolute';
+    winScreen.style.top = '0';
+    winScreen.style.left = '0';
+    winScreen.style.width = '100%';
+    winScreen.style.height = '100%';
+    winScreen.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+    winScreen.style.zIndex = '2000';
+    winScreen.style.display = 'flex';
+    winScreen.style.alignItems = 'center';
+    winScreen.style.justifyContent = 'center';
+    winScreen.style.color = 'white';
+    winScreen.style.fontSize = '3em';
+    winScreen.style.fontFamily = 'Arial, sans-serif';
+    winScreen.style.textAlign = 'center';
+    winScreen.style.whiteSpace = 'pre-wrap'; // To allow line breaks
+    winScreen.textContent = `Gratulacje!\nZdobyłeś komplet ${TOTAL_CRYSTALS} kryształów!`;
+
+    document.body.appendChild(winScreen);
+}
+
 function checkCrystalCollection() {
     if (!playerModel) return;
 
@@ -2236,6 +2311,54 @@ function checkCrystalCollection() {
                 });
                 minimapCrystalMarkers.splice(i, 1);
             }
+
+            // --- 7. Update UI Counter & Add Crystal Icon ---
+            collectedCrystals++; // Increment first
+            const crystalIndex = collectedCrystals - 1; // 0-based index
+
+            if (uiCrystalCountElement) {
+                uiCrystalCountElement.textContent = `${collectedCrystals} / ${TOTAL_CRYSTALS}`;
+                // Add "pop" animation
+                uiCrystalCountElement.classList.add('collected');
+                setTimeout(() => uiCrystalCountElement?.classList.remove('collected'), 300);
+            }
+
+            // Add the new crystal to the UI
+            if (uiCrystalTemplate && uiCrystalScene && uiCrystalCamera) {
+                const newUICrystal = uiCrystalTemplate.clone();
+
+                // Set its color
+                newUICrystal.traverse((child) => {
+                    if ((child as THREE.Mesh).isMesh) {
+                        const mesh = child as THREE.Mesh;
+                        if (mesh.material) {
+                            // We must clone the material to have unique colors
+                            const newMaterial = (mesh.material as THREE.MeshStandardMaterial).clone();
+                            newMaterial.emissive = new THREE.Color(crystalColor);
+                            newMaterial.emissiveIntensity = 0.75;
+                            mesh.material = newMaterial;
+                        }
+                    }
+                });
+
+                // Calculate its position
+                const rendererWidth = UI_CRYSTAL_SIZE * TOTAL_CRYSTALS;
+                const camHeight = UI_CRYSTAL_CAM_HEIGHT;
+                const camWidth = camHeight * (rendererWidth / UI_CRYSTAL_SIZE);
+                const spacing = camWidth / TOTAL_CRYSTALS;
+
+                newUICrystal.position.x = (-camWidth / 2) + (spacing / 2) + (crystalIndex * spacing) + 0.5;
+                newUICrystal.position.y = -1.3;
+
+                // Add to scene and array
+                uiCrystalScene.add(newUICrystal);
+                uiCrystalModels.push(newUICrystal);
+            }
+
+            // --- 8. Check for Win Condition ---
+            if (collectedCrystals === TOTAL_CRYSTALS) {
+                showWinScreen();
+            }
         }
     }
 }
@@ -2266,6 +2389,11 @@ function updateCameraPosition(instant: boolean = false) {
 }
 
 window.addEventListener("keydown", (event) => {
+    // Stop all input if the game is won
+    if (collectedCrystals === TOTAL_CRYSTALS) {
+        keys[event.key] = false;
+        return;
+    }
 
     // Ignore movement keys if controls are locked, but allow rotation
     if (
@@ -2314,6 +2442,64 @@ function setupLoadingBar() {
     document.body.appendChild(container);
 }
 
+/**
+ * Sets up the UI for displaying collected crystals.
+ */
+function setupCrystalUI() {
+    // Create the main UI container
+    const container = document.createElement('div');
+    container.id = 'crystal-ui-container';
+    container.style.position = 'absolute';
+    container.style.top = '20px';
+    container.style.right = '20px';
+    container.style.zIndex = '1000';
+    container.style.display = 'flex';
+    container.style.alignItems = 'center';
+    container.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+    container.style.padding = '5px 10px';
+    container.style.borderRadius = '10px';
+    document.body.appendChild(container);
+
+    // Create the text element for the count
+    uiCrystalCountElement = document.createElement('span');
+    uiCrystalCountElement.id = 'crystal-count-text';
+    uiCrystalCountElement.textContent = `0 / ${TOTAL_CRYSTALS}`;
+    uiCrystalCountElement.style.color = 'white';
+    uiCrystalCountElement.style.fontSize = '24px';
+    uiCrystalCountElement.style.marginRight = '12px';
+    container.appendChild(uiCrystalCountElement);
+
+    // Create the 3D renderer for the crystal icons
+    const rendererWidth = UI_CRYSTAL_SIZE * TOTAL_CRYSTALS;
+    const rendererHeight = UI_CRYSTAL_SIZE;
+
+    uiCrystalRenderer = new THREE.WebGLRenderer({antialias: true, alpha: true});
+    uiCrystalRenderer.setSize(rendererWidth, rendererHeight);
+    container.appendChild(uiCrystalRenderer.domElement);
+
+    // Create the scene for the UI renderer
+    uiCrystalScene = new THREE.Scene();
+
+    // Create the Orthographic camera for the UI renderer
+    const camHeight = UI_CRYSTAL_CAM_HEIGHT;
+    const camWidth = camHeight * (rendererWidth / rendererHeight);
+
+    uiCrystalCamera = new THREE.OrthographicCamera(
+        -camWidth / 2, camWidth / 2, // left, right
+        camHeight / 2, -camHeight / 2, // top, bottom
+        0.1,
+        100
+    );
+    uiCrystalCamera.position.z = 10;
+
+    // Add lighting to the UI scene
+    const uiLight = new THREE.DirectionalLight(0xffffff, 2.5);
+    uiLight.position.set(1, 1, 1);
+    uiCrystalScene.add(uiLight);
+    const uiAmbient = new THREE.AmbientLight(0xffffff, 1.5);
+    uiCrystalScene.add(uiAmbient);
+}
+
 function updateLoadingBar(progress: number, text: string = 'Loading Game Assets...') {
     const container = document.getElementById('loading-container');
     const fill = document.getElementById('loading-bar-fill');
@@ -2351,9 +2537,10 @@ function incrementLoadingProgress(stepName: string) {
 
 setupFpsCounter();
 setupLoadingBar();
+setupCrystalUI(); // Set up the UI elements before loading starts
 
-// Initialize loading with total steps: sun (1) + clouds (1) + player (2 steps) + world (2 steps) + 20 animals + 5 spiders + 10 crystals
-initializeLoading(1 + 1 + 2 + 2 + 20 + 5 + 10);
+// Initialize loading with total steps: sun (1) + clouds (1) + player (2 steps) + world (2 steps) + 20 animals + 5 spiders + 10 crystals + UI
+initializeLoading(1 + 1 + 2 + 2 + 20 + 5 + TOTAL_CRYSTALS + 1);
 
 createSun().then(() => {
     return createClouds();
@@ -2366,7 +2553,9 @@ createSun().then(() => {
 }).then(() => {
     return spawnSpiders(5);
 }).then(() => {
-    return spawnCrystals(10);
+    return spawnCrystals(TOTAL_CRYSTALS);
+}).then(() => {
+    return loadUICrystalTemplate();
 });
 
 function animate() {
@@ -2446,7 +2635,17 @@ function animate() {
         // Update and render minimap
         updateAndRenderMinimap();
 
+        // Render main scene
         renderer.render(scene, camera);
+
+        // Update and render Crystal UI
+        if (uiCrystalRenderer && uiCrystalScene && uiCrystalCamera) {
+            // Slowly rotate all collected crystals
+            for(const model of uiCrystalModels) {
+                model.rotation.y += 0.01;
+            }
+            uiCrystalRenderer.render(uiCrystalScene, uiCrystalCamera);
+        }
     }
 }
 
