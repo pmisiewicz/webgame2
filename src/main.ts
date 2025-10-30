@@ -2886,7 +2886,15 @@ function handlePlayerMovement() {
                         runningSound.stop();
                     }
                 } else {
-                    moveSpeed = RUN_SPEED;
+                    if (keys["Shift"]) {
+                        moveSpeed = RUN_SPEED * 2;
+                        if (runAction) runAction.timeScale = 2.0; // Speed up animation
+                        if (runningSound) runningSound.setPlaybackRate(2.0); // Speed up sound
+                    } else {
+                        moveSpeed = RUN_SPEED;
+                        if (runAction) runAction.timeScale = 1.0; // Normal animation speed
+                        if (runningSound) runningSound.setPlaybackRate(1.0); // Normal sound speed
+                    }
 
                     if (!runAction.isRunning()) {
                         walkAction.fadeOut(0.2);
@@ -2903,6 +2911,7 @@ function handlePlayerMovement() {
             } else {
                 if (runAction.isRunning()) {
                     runAction.stop();
+                    if (runAction) runAction.timeScale = 1.0;
                 }
                 if (walkAction.isRunning()) {
                     walkAction.stop();
@@ -2910,6 +2919,7 @@ function handlePlayerMovement() {
 
                 if (runningSound && runningSound.isPlaying) {
                     runningSound.stop();
+                    if (runningSound) runningSound.setPlaybackRate(1.0);
                 }
                 if (waterSound && waterSound.isPlaying) {
                     waterSound.stop();
