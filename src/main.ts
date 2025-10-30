@@ -3009,7 +3009,7 @@ function showWinScreen() {
     winScreen.style.fontFamily = 'Arial, sans-serif';
     winScreen.style.textAlign = 'center';
     winScreen.style.whiteSpace = 'pre-wrap'; // To allow line breaks
-    winScreen.textContent = `Gratulacje!\nRozwiązałeś ${TOTAL_EQUATIONS_TO_SOLVE} równań!`;
+    winScreen.textContent = `Gratulacje!\nRozwiązałeś ${TOTAL_EQUATIONS_TO_SOLVE} działań!`;
 
     document.body.appendChild(winScreen);
 }
