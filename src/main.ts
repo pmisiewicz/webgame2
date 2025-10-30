@@ -1128,17 +1128,60 @@ async function generateNewEquationAndRespawnCrystals() {
     // 1. Clear all old crystals
     clearAllCrystals();
 
-    // 2. Generate new equation (ensure A + B <= 10)
-    const S = Math.floor(Math.random() * 9) + 2; // sum in [2,10]
-    const A = Math.floor(Math.random() * (S - 1)) + 1; // A in [1, S-1]
-    const B = S - A;
-    currentTargetNumber = S; // A + B
-    currentEquation = `${A} + ${B} = ?`;
+    // 2. Choose an equation type randomly
+    type EqType = 'ADD' | 'SUB' | 'ADD_MISSING' | 'SUB_MISSING';
+    const types: EqType[] = ['ADD', 'SUB', 'ADD_MISSING', 'SUB_MISSING'];
+    const chosen = types[Math.floor(Math.random() * types.length)];
 
-    // 3. Update UI
+    // Helper to get random int inclusive
+    const randInt = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min;
+
+    let A = 0;
+    let B = 0;
+    let unknown = 0;
+    let equationText = '';
+
+    // Keep answers in range 1..10 (adjust as needed)
+    const MIN_VAL = 1;
+    const MAX_SUM = 10;
+
+    if (chosen === 'ADD') {
+        // A + B = ?
+        const S = randInt(2, MAX_SUM); // sum in [2, 10]
+        A = randInt(1, S - 1);
+        B = S - A;
+        unknown = S;
+        equationText = `${A} + ${B} = ?`;
+    } else if (chosen === 'SUB') {
+        // A - B = ?
+        // Ensure result >= 1: pick A in [2,10], B in [1, A-1]
+        A = randInt(2, MAX_SUM);
+        B = randInt(1, A - 1);
+        unknown = A - B;
+        equationText = `${A} - ${B} = ?`;
+    } else if (chosen === 'ADD_MISSING') {
+        // A + ? = B  => unknown = B - A (must be >=1)
+        A = randInt(1, MAX_SUM - 1);
+        // unknown x in [1, MAX_SUM - A] so B = A + x <= MAX_SUM
+        const x = randInt(1, MAX_SUM - A);
+        B = A + x;
+        unknown = x;
+        equationText = `${A} + ? = ${B}`;
+    } else { // SUB_MISSING
+        // A - ? = B => unknown = A - B (must be >=1), so pick A > B
+        // Choose A in [2, MAX_SUM], B in [1, A-1]
+        A = randInt(2, MAX_SUM);
+        B = randInt(1, A - 1);
+        unknown = A - B;
+        equationText = `${A} - ? = ${B}`;
+    }
+
+    // 3. Set globals and update UI
+    currentTargetNumber = unknown;
+    currentEquation = equationText;
     updateEquationUI();
 
-    // 4. Create array of numbers to spawn
+    // 4. Build numbers to spawn
     const numbersToSpawn: number[] = [];
     const NUM_CORRECT_CRYSTALS = 3;
 
@@ -1147,21 +1190,33 @@ async function generateNewEquationAndRespawnCrystals() {
         numbersToSpawn.push(currentTargetNumber);
     }
 
-    // Add distractor answers
+    // Add distractor answers (avoid duplicates of the correct answer)
     while (numbersToSpawn.length < TOTAL_CRYSTALS) {
-        // Generate distractors in a similar range (e.g., 2 to 18)
-        const distractor = Math.floor(Math.random() * 10) + 1;
-        if (distractor !== currentTargetNumber) {
+        // Distractors in [1, MAX_SUM] but not equal to correct
+        let distractor = randInt(MIN_VAL, MAX_SUM);
+
+        // Slightly bias distractors toward nearby values (optional)
+        // If too close to correct push it sometimes; otherwise keep random.
+        if (Math.random() < 0.4) {
+            const offset = randInt(-2, 2);
+            distractor = Math.max(MIN_VAL, Math.min(MAX_SUM, currentTargetNumber + offset));
+        }
+
+        if (distractor !== currentTargetNumber && !numbersToSpawn.includes(distractor)) {
             numbersToSpawn.push(distractor);
         }
     }
 
-    // Shuffle the array
-    numbersToSpawn.sort(() => Math.random() - 0.5);
+    // Shuffle
+    for (let i = numbersToSpawn.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [numbersToSpawn[i], numbersToSpawn[j]] = [numbersToSpawn[j], numbersToSpawn[i]];
+    }
 
-    // 5. Spawn the new crystals (this is async)
+    // 5. Spawn crystals
     await spawnCrystals(numbersToSpawn);
 }
+
 
 /**
  * Spawns a set of crystals based on an array of numbers.
