@@ -11,6 +11,7 @@ import errorSoundUrl from "/src/sfx/wrong-answer-21-199825.mp3";
 import waterSplashSoundUrl from "/src/sfx/water-splash-02-352021.mp3";
 import successSoundUrl from "/src/sfx/success-340660.mp3";
 import beeFlyingSoundUrl from "/src/sfx/bee-flying-loop-42287.mp3";
+import fireworkSoundUrl from "/src/sfx/firework.mp3"; // <-- ADDED
 
 const scene = new THREE.Scene();
 const skyColor = 0x87ceeb;
@@ -150,6 +151,7 @@ let biteSound: THREE.PositionalAudio | null = null;
 let errorSound: THREE.PositionalAudio | null = null;
 let waterSplashSound: THREE.PositionalAudio | null = null;
 let successSound: THREE.Audio | null = null;
+let fireworkBuffer: AudioBuffer | null = null; // <-- ADDED
 
 let playerModel: THREE.Group | null = null;
 const RUN_SPEED = 1.2;
@@ -1838,6 +1840,17 @@ function loadAudio() {
             console.error("Error loading success sound:", err);
         },
     );
+
+    audioLoader.load(
+        fireworkSoundUrl,
+        function (buffer) {
+            fireworkBuffer = buffer;
+        },
+        undefined,
+        (err) => {
+            console.error("Error loading firework sound:", err);
+        },
+    );
 }
 
 async function createPlayer() {
@@ -2982,6 +2995,80 @@ function handlePlayerMovement() {
 }
 
 /**
+ * Spawns a single 2D firework burst on the win screen.
+ */
+function spawn2DFirework() {
+    const winScreen = document.getElementById('win-screen');
+    if (!winScreen) return; // Don't spawn if screen isn't up
+
+    if (fireworkBuffer && listener) {
+        const sound = new THREE.Audio(listener);
+        sound.setBuffer(fireworkBuffer);
+        sound.setVolume(0.5 + Math.random() * 0.3); // Vary volume
+        sound.setPlaybackRate(0.8 + Math.random() * 1); // Vary pitch
+        sound.play();
+    }
+
+    const burst = document.createElement('div');
+    burst.style.position = 'absolute';
+    // Random position on screen
+    burst.style.left = `${Math.random() * 100}%`;
+    burst.style.top = `${Math.random() * 100}%`;
+    // We need to set width/height to 0 so particles expand from a point
+    burst.style.width = '1px';
+    burst.style.height = '1px';
+
+    winScreen.appendChild(burst);
+
+    const particleCount = 40 + Math.floor(Math.random() * 30); // 40-70 particles
+    const colors = ['#FF4136', '#FF851B', '#FFDC00', '#2ECC40', '#0074D9', '#B10DC9', '#FFFFFF'];
+    const burstColor = colors[Math.floor(Math.random() * colors.length)];
+
+    for (let i = 0; i < particleCount; i++) {
+        const particle = document.createElement('div');
+        particle.style.position = 'absolute';
+        // Start at center
+        particle.style.left = '0';
+        particle.style.top = '0';
+
+        // --- Random size ---
+        const size = 2 + Math.random() * 2; // 2px to 4px
+        particle.style.width = `${size}px`;
+        particle.style.height = `${size}px`;
+        // --- End Random size ---
+
+        particle.style.backgroundColor = burstColor;
+        particle.style.borderRadius = '50%';
+
+        // CSS Custom Properties for dynamic animation
+        const angle = Math.random() * 360;
+        const distance = Math.random() * 150 + 80; // 80 to 230px
+        const finalX = Math.cos(angle * (Math.PI / 180)) * distance;
+        const finalY = Math.sin(angle * (Math.PI / 180)) * distance;
+
+        particle.style.setProperty('--final-x', `${finalX}px`);
+        particle.style.setProperty('--final-y', `${finalY}px`);
+
+        // Add a random delay to make the burst look more "twinkly"
+        const delay = Math.random() * 200; // 0-200ms delay
+
+        // --- Random duration ---
+        const duration = 1.0 + Math.random() * 0.5;
+
+        // Set animation
+        particle.style.animation = `firework-burst ${duration}s ease-out forwards`;
+        particle.style.animationDelay = `${delay}ms`;
+
+        burst.appendChild(particle);
+    }
+
+    // Clean up the burst container after the animation
+    setTimeout(() => {
+        burst.remove();
+    }, 1800); // 1.5s max animation + 0.2s max delay + buffer
+}
+
+/**
  * Displays a win screen and locks the game.
  */
 function showWinScreen() {
@@ -3013,9 +3100,33 @@ function showWinScreen() {
     winScreen.style.fontFamily = 'Arial, sans-serif';
     winScreen.style.textAlign = 'center';
     winScreen.style.whiteSpace = 'pre-wrap'; // To allow line breaks
+    winScreen.style.overflow = 'hidden'; // Prevent particles from causing scrollbars
     winScreen.textContent = `Gratulacje!\nRozwiązałeś ${TOTAL_EQUATIONS_TO_SOLVE} działań!`;
 
     document.body.appendChild(winScreen);
+
+    const style = document.createElement('style');
+    style.textContent = `
+        @keyframes firework-burst {
+            0% {
+                transform: translate(0, 0) scale(1);
+                opacity: 1;
+            }
+            80% {
+                opacity: 1;
+            }
+            100% {
+                transform: translate(var(--final-x), var(--final-y)) scale(0);
+                opacity: 0;
+            }
+        }
+    `;
+    document.head.appendChild(style);
+
+    spawn2DFirework();
+    for (let i=0; i<10; i++) {
+        setInterval(spawn2DFirework, 500 + Math.random() * 1000);
+    }
 }
 
 function checkCrystalCollection() {
