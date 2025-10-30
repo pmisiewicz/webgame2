@@ -42,7 +42,7 @@ const MINIMAP_SIZE = 250;
 const minimapRenderer = new THREE.WebGLRenderer({antialias: true, alpha: true});
 minimapRenderer.setSize(MINIMAP_SIZE, MINIMAP_SIZE);
 minimapRenderer.domElement.style.position = 'absolute';
-minimapRenderer.domElement.style.bottom = '20px';
+minimapRenderer.domElement.style.top = '20px';
 minimapRenderer.domElement.style.right = '20px';
 minimapRenderer.domElement.style.border = '3px solid #333';
 minimapRenderer.domElement.style.borderRadius = '10px';
@@ -3213,6 +3213,172 @@ function setupLoadingBar() {
 }
 
 /**
+ * Konfiguruje kontrolki dotykowe na ekranie dla urządzeń mobilnych.
+ * Tworzy joystick po lewej stronie i przyciski akcji (skok, bieg) po prawej.
+ */
+function setupMobileControls() {
+    // --- Stwórz elementy HTML ---
+    const container = document.createElement('div');
+    container.id = 'mobile-controls-container';
+    container.innerHTML = `
+        <div id="joystick-base">
+            <div id="joystick-stick"></div>
+        </div>
+
+        <div id="action-buttons">
+            <div id="run-button" class="action-btn">
+                &#x21E7;
+            </div>
+            <div id="jump-button" class="action-btn">
+                &#x2934;
+            </div>
+        </div>
+    `;
+    document.body.appendChild(container);
+
+    // --- Pobierz referencje do elementów ---
+    const joystickBase = document.getElementById('joystick-base')!;
+    const joystickStick = document.getElementById('joystick-stick')! as HTMLElement;
+    const jumpButton = document.getElementById('jump-button')!;
+    const runButton = document.getElementById('run-button')!;
+
+    // --- Logika przycisku Skoku (Jump) ---
+    // Musi bezpośrednio wywołać logikę skoku, tak jak w 'keydown'
+    jumpButton.addEventListener('touchstart', (e) => {
+        e.preventDefault(); // Zapobiegaj zoomowaniu
+        // Ta logika jest skopiowana z Twojego listenera 'keydown' dla spacji
+        if (jumpsRemaining > 0 && !controlsLocked) {
+            isJumping = true;
+            jumpVelocity = JUMP_FORCE;
+            jumpsRemaining--;
+        }
+    }, { passive: false });
+    // Nie potrzebujemy 'touchend' dla skoku, bo jest to akcja natychmiastowa
+
+    // --- Logika przycisku Biegu (Run) ---
+    // Ten przycisk musi być trzymany, więc ustawia flagę w 'keys'
+    runButton.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        keys['Shift'] = true;
+    }, { passive: false });
+
+    runButton.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        keys['Shift'] = false;
+    });
+
+    // --- Logika Joysticka ---
+    let stickActive = false;
+    let currentTouchId: number | null = null;
+    let baseRect = joystickBase.getBoundingClientRect();
+    let stickCenter = new THREE.Vector2(baseRect.left + baseRect.width / 2, baseRect.top + baseRect.height / 2);
+    // Maksymalny dystans, jaki może przebyć środek drążka
+    const maxStickOffset = baseRect.width / 2 - (joystickStick.clientWidth / 2) + 10; // 120/2 - 60/2 = 30 + 10 = 40
+
+    // Aktualizuj pozycję bazy przy zmianie rozmiaru okna
+    window.addEventListener('resize', () => {
+        baseRect = joystickBase.getBoundingClientRect();
+        stickCenter.set(baseRect.left + baseRect.width / 2, baseRect.top + baseRect.height / 2);
+    });
+
+    joystickBase.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        if (stickActive) return; // Już śledzimy jeden dotyk
+
+        const touch = e.changedTouches[0];
+        stickActive = true;
+        currentTouchId = touch.identifier;
+
+        // Przesuń drążek natychmiast
+        updateStickPosition(touch.clientX, touch.clientY);
+
+    }, { passive: false });
+
+    // Nasłuchuj na całym oknie, na wypadek gdyby palec wyjechał poza bazę
+    window.addEventListener('touchmove', (e) => {
+        if (!stickActive) return;
+
+        let touch: Touch | null = null;
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            if (e.changedTouches[i].identifier === currentTouchId) {
+                touch = e.changedTouches[i];
+                break;
+            }
+        }
+        if (!touch) return; // To nie nasz dotyk
+
+        e.preventDefault(); // Zapobiegaj przewijaniu strony
+        updateStickPosition(touch.clientX, touch.clientY);
+
+    }, { passive: false });
+
+    const onStickEnd = (e: TouchEvent) => {
+        if (!stickActive) return;
+
+        let touchEnded = false;
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            if (e.changedTouches[i].identifier === currentTouchId) {
+                touchEnded = true;
+                break;
+            }
+        }
+
+        if (!touchEnded) return; // Inny palec został podniesiony
+
+        // Resetuj stan
+        stickActive = false;
+        currentTouchId = null;
+        joystickStick.style.transform = `translate(0px, 0px)`;
+
+        // Resetuj klawisze ruchu
+        keys['w'] = false;
+        keys['s'] = false;
+        keys['a'] = false;
+        keys['d'] = false;
+    };
+
+    window.addEventListener('touchend', onStickEnd);
+    window.addEventListener('touchcancel', onStickEnd);
+
+    /**
+     * Wewnętrzna funkcja do aktualizacji pozycji drążka i flag 'keys'
+     */
+    function updateStickPosition(clientX: number, clientY: number) {
+        const deltaX = clientX - stickCenter.x;
+        const deltaY = clientY - stickCenter.y;
+
+        const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+
+        // Ogranicz ruch drążka do wnętrza bazy
+        const clampedX = (deltaX / distance) * Math.min(distance, maxStickOffset);
+        const clampedY = (deltaY / distance) * Math.min(distance, maxStickOffset);
+
+        // Zastosuj wizualną transformację
+        joystickStick.style.transform = `translate(${clampedX}px, ${clampedY}px)`;
+
+        // --- Mapuj na klawisze gry ---
+        // Ustaw "strefę martwą" (deadzone) na 20%
+        const deadzone = maxStickOffset * 0.2;
+        const sensitivity = maxStickOffset * 0.5; // Próg dla lewo/prawo
+
+        // Przód / Tył
+        keys['w'] = (clampedY < -deadzone);
+        keys['s'] = (clampedY > deadzone);
+
+        // Lewo / Prawo
+        keys['a'] = (clampedX < -sensitivity);
+        keys['d'] = (clampedX > sensitivity);
+
+        // Jeśli idziemy do przodu/tyłu, ale nie skręcamy mocno, wyłącz skręt
+        // Pozwala to na łatwiejsze poruszanie się na wprost
+        if ((keys['w'] || keys['s']) && Math.abs(clampedX) < sensitivity) {
+            keys['a'] = false;
+            keys['d'] = false;
+        }
+    }
+}
+
+/**
  * Sets up the UI for displaying collected crystals.
  */
 function setupCrystalUI() {
@@ -3342,6 +3508,7 @@ setupFpsCounter();
 setupLoadingBar();
 setupCrystalUI(); // Set up the UI elements before loading starts
 setupEquationUI(); // Set up the new equation UI
+setupMobileControls();
 
 const animalCount = 10;
 const spiderCount = 3;
