@@ -9,6 +9,9 @@ npm run build
 #copy to /docs
 cp -r ./dist/* ./docs/
 
+#add new files to git
+git add ./docs/*
+
 #replace paths
 find ./docs -type f \( -name "*.html" -o -name "*.js" -o -name "*.css" \) | while read -r file; do
   sed -i \
