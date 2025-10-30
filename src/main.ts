@@ -6,7 +6,7 @@ import runningSoundUrl from "/src/sfx/running-in-grass-6237.mp3";
 import waterSoundUrl from "/src/sfx/walking-in-water-199418.mp3";
 import bumpSoundUrl from "/src/sfx/boing2-418548.mp3";
 import forestAtmosphereUrl from "/src/sfx/forest-atmosphere-001localization-poland-329745.mp3";
-import animalHitSoundUrl from "/src/sfx/small-monster-attack-195712.mp3";
+import animalHitSoundUrl from "/src/sfx/zombie-bite-96528.mp3";
 import errorSoundUrl from "/src/sfx/wrong-answer-21-199825.mp3";
 import waterSplashSoundUrl from "/src/sfx/water-splash-02-352021.mp3";
 import successSoundUrl from "/src/sfx/success-340660.mp3";
@@ -3296,7 +3296,7 @@ function setupEquationUI() {
  */
 function updateEquationUI() {
     if (equationElement) {
-        equationElement.textContent = `Rozwiąż równanie: ${currentEquation}`;
+        equationElement.textContent = `Rozwiąż działanie: ${currentEquation}`;
         // Add "pop" animation (reuses .collected style)
         equationElement.classList.add('collected');
         setTimeout(() => equationElement?.classList.remove('collected'), 300);
