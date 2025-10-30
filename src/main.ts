@@ -225,7 +225,7 @@ const MAX_JUMPS = 2;
 let jumpsRemaining = MAX_JUMPS;
 let bumpSoundPlayed = false;
 
-const FPS_LIMIT = 100;
+const FPS_LIMIT = 60;
 const interval = 1000 / FPS_LIMIT;
 let then = performance.now();
 
@@ -2531,8 +2531,11 @@ setupFpsCounter();
 setupLoadingBar();
 setupCrystalUI(); // Set up the UI elements before loading starts
 
+const animalCount = 10;
+const spiderCount = 5;
+
 // Initialize loading with total steps: sun (1) + clouds (1) + player (2 steps) + world (2 steps) + 20 animals + 5 spiders + 10 crystals + UI
-initializeLoading(1 + 1 + 2 + 2 + 20 + 5 + TOTAL_CRYSTALS + 1);
+initializeLoading(1 + 1 + 2 + 2 + animalCount + spiderCount + TOTAL_CRYSTALS + 1);
 
 createSun().then(() => {
     return createClouds();
@@ -2541,9 +2544,9 @@ createSun().then(() => {
 }).then(() => {
     return createWorld();
 }).then(() => {
-    return spawnAnimals(20);
+    return spawnAnimals(animalCount);
 }).then(() => {
-    return spawnSpiders(5);
+    return spawnSpiders(spiderCount);
 }).then(() => {
     return spawnCrystals(TOTAL_CRYSTALS);
 }).then(() => {
