@@ -44,7 +44,11 @@ const MINIMAP_SIZE = isMobile ? 120 : 250;
 const minimapRenderer = new THREE.WebGLRenderer({antialias: true, alpha: true});
 minimapRenderer.setSize(MINIMAP_SIZE, MINIMAP_SIZE);
 minimapRenderer.domElement.style.position = 'absolute';
-minimapRenderer.domElement.style.top = '20px';
+if (isMobile) {
+    minimapRenderer.domElement.style.top = '20px';
+} else {
+    minimapRenderer.domElement.style.bottom = '20px';
+}
 minimapRenderer.domElement.style.right = '20px';
 minimapRenderer.domElement.style.border = '3px solid #333';
 minimapRenderer.domElement.style.borderRadius = '10px';
@@ -99,7 +103,7 @@ const minimapCrystalMarkers: THREE.Mesh[] = [];
 // --- Crystal Collected UI (Top Right) ---
 const TOTAL_CRYSTALS = 10; // This is now TOTAL_EQUATIONS_TO_SOLVE
 const TOTAL_EQUATIONS_TO_SOLVE = TOTAL_CRYSTALS;
-const UI_CRYSTAL_SIZE = 50; // This is the HEIGHT of the renderer
+const UI_CRYSTAL_SIZE = isMobile ? 20 : 50; // This is the HEIGHT of the renderer
 const UI_CRYSTAL_CAM_HEIGHT = 3.0; // Vertical units visible in UI camera
 const UI_CRYSTAL_SCALE = 0.3; // Scale of crystal models in the UI
 
@@ -3445,12 +3449,12 @@ function setupEquationUI() {
     equationElement = document.createElement('div');
     equationElement.id = 'equation-ui';
     equationElement.style.position = 'absolute';
-    equationElement.style.top = '50px';
+    equationElement.style.top = '30px';
     equationElement.style.left = '50%';
     equationElement.style.transform = 'translateX(-50%)';
     equationElement.style.zIndex = '1000';
     equationElement.style.color = 'white';
-    equationElement.style.fontSize = isMobile ? '24px' : '45px';
+    equationElement.style.fontSize = isMobile ? '18px' : '45px';
     equationElement.style.fontFamily = 'Arial, sans-serif';
     equationElement.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
     equationElement.style.padding = '10px 20px';
