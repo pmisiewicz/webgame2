@@ -7,6 +7,7 @@ import waterSoundUrl from "/src/sfx/walking-in-water-199418.mp3";
 import bumpSoundUrl from "/src/sfx/boing2-418548.mp3";
 import forestAtmosphereUrl from "/src/sfx/forest-atmosphere-001localization-poland-329745.mp3";
 import animalHitSoundUrl from "/src/sfx/small-monster-attack-195712.mp3";
+import errorSoundUrl from "/src/sfx/wrong-answer-21-199825.mp3";
 import waterSplashSoundUrl from "/src/sfx/water-splash-02-352021.mp3";
 import successSoundUrl from "/src/sfx/success-340660.mp3";
 
@@ -90,7 +91,8 @@ const minimapSpiderMarkers: THREE.Mesh[] = [];
 const minimapCrystalMarkers: THREE.Mesh[] = [];
 
 // --- Crystal Collected UI (Top Right) ---
-const TOTAL_CRYSTALS = 10; // Must match spawnCrystals() count
+const TOTAL_CRYSTALS = 10; // This is now TOTAL_EQUATIONS_TO_SOLVE
+const TOTAL_EQUATIONS_TO_SOLVE = TOTAL_CRYSTALS;
 const UI_CRYSTAL_SIZE = 50; // This is the HEIGHT of the renderer
 const UI_CRYSTAL_CAM_HEIGHT = 3.0; // Vertical units visible in UI camera
 const UI_CRYSTAL_SCALE = 0.3; // Scale of crystal models in the UI
@@ -101,7 +103,12 @@ let uiCrystalCamera: THREE.OrthographicCamera | null = null; // Changed to Ortho
 let uiCrystalTemplate: THREE.Group | null = null; // This is the template we will clone
 const uiCrystalModels: THREE.Group[] = []; // Array to hold collected crystal models
 let uiCrystalCountElement: HTMLElement | null = null;
-let collectedCrystals = 0;
+let collectedCrystals = 0; // This now tracks solved equations
+
+// --- Equation UI (Top Center) ---
+let equationElement: HTMLElement | null = null;
+let currentTargetNumber: number = 0;
+let currentEquation: string = "";
 
 const hemiLight = new THREE.HemisphereLight(0xffffff, 0xdddddd, 1.2);
 hemiLight.position.set(0, 100, 0);
@@ -129,7 +136,8 @@ let runningSound: THREE.PositionalAudio | null = null;
 let waterSound: THREE.PositionalAudio | null = null;
 let bumpSound: THREE.PositionalAudio | null = null;
 let backgroundMusic: THREE.Audio | null = null;
-let animalHitSound: THREE.PositionalAudio | null = null;
+let biteSound: THREE.PositionalAudio | null = null;
+let errorSound: THREE.PositionalAudio | null = null;
 let waterSplashSound: THREE.PositionalAudio | null = null;
 let successSound: THREE.Audio | null = null;
 
@@ -338,7 +346,7 @@ function triggerPlayerFall(lockDuration: number = 1000): void {
     setTimeout(() => {
         controlsLocked = false;
         // Check if the game-win lock is also active
-        if (collectedCrystals === TOTAL_CRYSTALS) {
+        if (collectedCrystals === TOTAL_EQUATIONS_TO_SOLVE) {
             controlsLocked = true;
         }
     }, lockDuration);
@@ -1013,17 +1021,163 @@ function updateSpiderJumpBack(spider: SpiderInstance) {
 // Crystal system
 const crystals: THREE.Group[] = [];
 
-async function spawnCrystals(count: number) {
+/**
+ * Creates a 3D text label (a billboard) for a crystal.
+ * This works by drawing text onto a 2D canvas and using that as a texture
+ * on a THREE.Sprite, which always faces the camera.
+ * @param text The number to display (e.g., "1").
+ * @param color The THREE.Color of the crystal's glow.
+ * @returns A THREE.Sprite with the number texture.
+ */
+function createCrystalNumber(text: string, color: THREE.Color): THREE.Sprite { // <-- 1. Return THREE.Sprite
+    const canvas = document.createElement('canvas');
+    const canvasSize = 128; // Texture resolution (power of 2)
+    canvas.width = canvasSize;
+    canvas.height = canvasSize;
+
+    const context = canvas.getContext('2d');
+    if (!context) {
+        // Fallback in case canvas fails
+        return new THREE.Sprite(); // <-- 2. Return empty Sprite
+    }
+
+    // --- Setup Font Style ---
+    const fontSize = 100;
+    // Use a common "cartoon-like" font, fallback to sans-serif
+    context.font = `bold ${fontSize}px "Comic Sans MS", Arial, sans-serif`;
+    context.textAlign = 'center';
+    context.textBaseline = 'middle'; // Center text vertically
+
+    // --- Draw Black Border ---
+    context.strokeStyle = 'black'; // Black border color
+    context.lineWidth = 3; // Border thickness
+    context.strokeText(text, canvasSize / 2, canvasSize / 2);
+
+    // --- Draw Colored Fill ---
+    context.fillStyle = color.getStyle(); // Get CSS string (e.g., "rgb(0, 153, 255)")
+    context.fillText(text, canvasSize / 2, canvasSize / 2);
+
+    // --- Create Texture ---
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true; // Ensure texture uploads to GPU
+
+    // --- 3. Use SpriteMaterial ---
+    const material = new THREE.SpriteMaterial({
+        map: texture,
+        transparent: true,
+    });
+
+    // --- 4. Create Sprite instead of Mesh ---
+    const sprite = new THREE.Sprite(material);
+
+    // Set the size. This is in local space (like the plane was).
+    // When parented to the crystal (scale 0.1), this will be 1x1 world units.
+    sprite.scale.set(10, 10, 1);
+
+    return sprite;
+}
+
+/**
+ * Removes all crystals from the scene and minimap.
+ */
+function clearAllCrystals() {
+    // 1. Remove from main scene and dispose
+    for (let i = crystals.length - 1; i >= 0; i--) {
+        const crystal = crystals[i];
+        scene.remove(crystal);
+        crystal.traverse((child) => {
+            if ((child as THREE.Mesh).isMesh) {
+                (child as THREE.Mesh).geometry?.dispose();
+                const material = (child as THREE.Mesh).material;
+                if (material) {
+                    Array.isArray(material)
+                        ? material.forEach(mat => mat.dispose())
+                        : material.dispose();
+                }
+            } else if (child instanceof THREE.Sprite) { // Dispose sprite material
+                (child.material as THREE.SpriteMaterial).map?.dispose();
+                child.material.dispose();
+            }
+        });
+    }
+    crystals.length = 0; // Clear the array
+
+    // 2. Remove from minimap scene and dispose
+    for (let i = minimapCrystalMarkers.length - 1; i >= 0; i--) {
+        const marker = minimapCrystalMarkers[i];
+        minimapScene.remove(marker);
+        marker.traverse((child) => {
+            if ((child as THREE.Mesh).isMesh) {
+                (child as THREE.Mesh).geometry?.dispose();
+                const material = (child as THREE.Mesh).material;
+                if (material) {
+                    Array.isArray(material)
+                        ? material.forEach(mat => mat.dispose())
+                        : material.dispose();
+                }
+            }
+        });
+    }
+    minimapCrystalMarkers.length = 0; // Clear the array
+}
+
+/**
+ * Generates a new equation, clears old crystals, and spawns a new set.
+ */
+async function generateNewEquationAndRespawnCrystals() {
+    // 1. Clear all old crystals
+    clearAllCrystals();
+
+    // 2. Generate new equation (ensure A + B <= 10)
+    const S = Math.floor(Math.random() * 9) + 2; // sum in [2,10]
+    const A = Math.floor(Math.random() * (S - 1)) + 1; // A in [1, S-1]
+    const B = S - A;
+    currentTargetNumber = S; // A + B
+    currentEquation = `${A} + ${B} = ?`;
+
+    // 3. Update UI
+    updateEquationUI();
+
+    // 4. Create array of numbers to spawn
+    const numbersToSpawn: number[] = [];
+    const NUM_CORRECT_CRYSTALS = 3;
+
+    // Add correct answers
+    for (let i = 0; i < NUM_CORRECT_CRYSTALS; i++) {
+        numbersToSpawn.push(currentTargetNumber);
+    }
+
+    // Add distractor answers
+    while (numbersToSpawn.length < TOTAL_CRYSTALS) {
+        // Generate distractors in a similar range (e.g., 2 to 18)
+        const distractor = Math.floor(Math.random() * 17) + 2;
+        if (distractor !== currentTargetNumber) {
+            numbersToSpawn.push(distractor);
+        }
+    }
+
+    // Shuffle the array
+    numbersToSpawn.sort(() => Math.random() - 0.5);
+
+    // 5. Spawn the new crystals (this is async)
+    await spawnCrystals(numbersToSpawn);
+}
+
+/**
+ * Spawns a set of crystals based on an array of numbers.
+ * @param numbersToSpawn An array of numbers to display on the crystals.
+ */
+async function spawnCrystals(numbersToSpawn: number[]) {
     const areaSize = 220;
     const spawnAttempts = 1000;
     const MIN_DISTANCE_FROM_PLAYER = 20; // Minimum distance from player spawn point
     const playerStartPos = new THREE.Vector3(5, 7, 8);
 
-    for (let i = 0; i < count; i++) {
+    for (let i = 0; i < numbersToSpawn.length; i++) {
         try {
             const {model} = await loadModel("Crystal.glb");
 
-            incrementLoadingProgress(`Loading Crystals... (${i + 1}/${count})`);
+            incrementLoadingProgress(`Spawning Crystals... (${i + 1}/${numbersToSpawn.length})`);
 
             // Crystal scale - make them smaller
             const scaleFactor = 0.1;
@@ -1110,6 +1264,20 @@ async function spawnCrystals(count: number) {
             ];
             const randomColor = colorPalette[Math.floor(Math.random() * colorPalette.length)];
 
+            // Get the text (from the array) and color
+            const crystalNumber = numbersToSpawn[i];
+            const numberText = crystalNumber.toString();
+            const numberColor = new THREE.Color(randomColor);
+
+            // Create the number mesh using the helper function
+            const numberMesh = createCrystalNumber(numberText, numberColor);
+
+            // Position it slightly above the crystal's origin (in local space)
+            numberMesh.position.y = 12;
+
+            // Store the crystal's value in its userData
+            model.userData.crystalValue = crystalNumber;
+
             model.traverse((child) => {
                 if ((child as THREE.Mesh).isMesh) {
                     const mesh = child as THREE.Mesh;
@@ -1123,6 +1291,9 @@ async function spawnCrystals(count: number) {
                     }
                 }
             });
+
+            // Add the number mesh as a child of the crystal's main group.
+            model.add(numberMesh);
 
             scene.add(model);
             crystals.push(model);
@@ -1223,24 +1394,43 @@ function loadAudio() {
         },
     );
 
-    // Load animal hit sound
-    animalHitSound = new THREE.PositionalAudio(listener);
+    // Load bite sound
+    biteSound = new THREE.PositionalAudio(listener);
     audioLoader.load(
         animalHitSoundUrl,
         function (buffer) {
-            if (animalHitSound) {
-                animalHitSound.setBuffer(buffer);
-                animalHitSound.setLoop(false);
-                animalHitSound.setVolume(1);
-                animalHitSound.setRefDistance(10);
+            if (biteSound) {
+                biteSound.setBuffer(buffer);
+                biteSound.setLoop(false);
+                biteSound.setVolume(1);
+                biteSound.setRefDistance(10);
             }
         },
         undefined,
         (err) => {
-            console.error("Error loading animal hit sound:", err);
+            console.error("Error loading bite sound:", err);
         },
     );
-    playerModel.add(animalHitSound);
+    playerModel.add(biteSound);
+
+    // Load error sound
+    errorSound = new THREE.PositionalAudio(listener);
+    audioLoader.load(
+        errorSoundUrl,
+        function (buffer) {
+            if (errorSound) {
+                errorSound.setBuffer(buffer);
+                errorSound.setLoop(false);
+                errorSound.setVolume(2);
+                errorSound.setRefDistance(10);
+            }
+        },
+        undefined,
+        (err) => {
+            console.error("Error loading error sound:", err);
+        },
+    );
+    playerModel.add(biteSound);
 
     // Load water splash sound
     waterSplashSound = new THREE.PositionalAudio(listener);
@@ -1729,8 +1919,8 @@ function updateSpiderAI(spider: SpiderInstance) {
                 triggerSpiderAttack(spider);
 
                 // Play hit sound
-                if (animalHitSound && !animalHitSound.isPlaying) {
-                    animalHitSound.play();
+                if (biteSound && !biteSound.isPlaying) {
+                    biteSound.play();
                 }
             }
         } else {
@@ -1844,7 +2034,7 @@ function handlePlayerMovement() {
 
     if (controlsLocked) {
         // Allow rotation only if it's the temporary fall lock, not the permanent game-win lock
-        if (collectedCrystals < TOTAL_CRYSTALS) {
+        if (collectedCrystals < TOTAL_EQUATIONS_TO_SOLVE) {
             if (keys["a"] || keys["A"] || keys["ArrowLeft"]) {
                 playerModel.rotation.y += rotationSpeed;
             }
@@ -1975,8 +2165,8 @@ function handlePlayerMovement() {
                 }
 
                 // Play hit sound
-                if (animalHitSound && !animalHitSound.isPlaying) {
-                    animalHitSound.play();
+                if (biteSound && !biteSound.isPlaying) {
+                    biteSound.play();
                 }
             }
             // Handle animal collision - just block movement, no animation or sound
@@ -2227,7 +2417,7 @@ function showWinScreen() {
     winScreen.style.fontFamily = 'Arial, sans-serif';
     winScreen.style.textAlign = 'center';
     winScreen.style.whiteSpace = 'pre-wrap'; // To allow line breaks
-    winScreen.textContent = `Gratulacje!\nZdobyłeś komplet ${TOTAL_CRYSTALS} kryształów!`;
+    winScreen.textContent = `Gratulacje!\nRozwiązałeś ${TOTAL_EQUATIONS_TO_SOLVE} równań!`;
 
     document.body.appendChild(winScreen);
 }
@@ -2245,110 +2435,110 @@ function checkCrystalCollection() {
         const distance = playerPos.distanceTo(crystalPos);
 
         if (distance < CRYSTAL_COLLECT_RADIUS) {
-            // --- Player collected the crystal! ---
 
-            // 1. Get crystal color for the effect
-            let crystalColor = new THREE.Color(0x00aaff); // Default color
-            crystal.traverse((child) => {
-                if ((child as THREE.Mesh).isMesh) {
-                    const material = (child as THREE.Mesh).material as THREE.MeshStandardMaterial;
-                    if (material && material.emissive) {
-                        crystalColor.copy(material.emissive);
-                    }
-                }
-            });
+            const collectedValue = crystal.userData.crystalValue as number | undefined;
 
-            if (successSound) {
-                successSound.stop();
-                successSound.play();
+            if (collectedValue === undefined) {
+                console.warn("Collected crystal has no value!");
+                continue; // Sprawdź następny kryształ
             }
 
-            // 3. Spawn particle effect
-            spawnCrystalCollectEffect(crystalPos, crystalColor);
-
-            // 4. Remove crystal from scene and dispose of its assets
-            scene.remove(crystal);
-            crystal.traverse((child) => {
-                if ((child as THREE.Mesh).isMesh) {
-                    (child as THREE.Mesh).geometry?.dispose();
-                    const material = (child as THREE.Mesh).material;
-                    if (material) {
-                        Array.isArray(material)
-                            ? material.forEach(mat => mat.dispose())
-                            : material.dispose();
-                    }
-                }
-            });
-
-            // 5. Remove crystal from logic array
-            crystals.splice(i, 1);
-
-            // 6. Remove crystal marker from minimap and dispose
-            const marker = minimapCrystalMarkers[i];
-            if (marker) {
-                minimapScene.remove(marker);
-                // Dispose marker geometry and materials
-                marker.traverse((child) => {
+            // --- Check if it's the CORRECT crystal ---
+            if (collectedValue === currentTargetNumber) {
+                // 1. Get crystal color for the effect
+                let crystalColor = new THREE.Color(0x00aaff); // Default color
+                crystal.traverse((child) => {
                     if ((child as THREE.Mesh).isMesh) {
-                        (child as THREE.Mesh).geometry?.dispose();
-                        const material = (child as THREE.Mesh).material;
-                        if (material) {
-                            Array.isArray(material)
-                                ? material.forEach(mat => mat.dispose())
-                                : material.dispose();
-                        }
-                    }
-                });
-                minimapCrystalMarkers.splice(i, 1);
-            }
-
-            // --- 7. Update UI Counter & Add Crystal Icon ---
-            collectedCrystals++; // Increment first
-            const crystalIndex = collectedCrystals - 1; // 0-based index
-
-            if (uiCrystalCountElement) {
-                uiCrystalCountElement.textContent = `${collectedCrystals} / ${TOTAL_CRYSTALS}`;
-                // Add "pop" animation
-                uiCrystalCountElement.classList.add('collected');
-                setTimeout(() => uiCrystalCountElement?.classList.remove('collected'), 300);
-            }
-
-            // Add the new crystal to the UI
-            if (uiCrystalTemplate && uiCrystalScene && uiCrystalCamera) {
-                const newUICrystal = uiCrystalTemplate.clone();
-
-                // Set its color
-                newUICrystal.traverse((child) => {
-                    if ((child as THREE.Mesh).isMesh) {
-                        const mesh = child as THREE.Mesh;
-                        if (mesh.material) {
-                            // We must clone the material to have unique colors
-                            const newMaterial = (mesh.material as THREE.MeshStandardMaterial).clone();
-                            newMaterial.emissive = new THREE.Color(crystalColor);
-                            newMaterial.emissiveIntensity = 0.75;
-                            mesh.material = newMaterial;
+                        const material = (child as THREE.Mesh).material as THREE.MeshStandardMaterial;
+                        if (material && material.emissive) {
+                            crystalColor.copy(material.emissive);
                         }
                     }
                 });
 
-                // Calculate its position
-                const rendererWidth = UI_CRYSTAL_SIZE * TOTAL_CRYSTALS;
-                const camHeight = UI_CRYSTAL_CAM_HEIGHT;
-                const camWidth = camHeight * (rendererWidth / UI_CRYSTAL_SIZE);
-                const spacing = camWidth / TOTAL_CRYSTALS;
+                // 2. Play success sound
+                if (successSound) {
+                    successSound.stop();
+                    successSound.play();
+                }
 
-                newUICrystal.position.x = (-camWidth / 2) + (spacing / 2) + (crystalIndex * spacing) + 0.5;
-                newUICrystal.position.y = -1.3;
+                // 3. Spawn particle effect
+                spawnCrystalCollectEffect(crystalPos, crystalColor);
 
-                // Add to scene and array
-                uiCrystalScene.add(newUICrystal);
-                uiCrystalModels.push(newUICrystal);
+                // 4. Update UI Counter & Add Crystal Icon
+                collectedCrystals++; // Increment score
+                const crystalIndex = collectedCrystals - 1; // 0-based index
+
+                if (uiCrystalCountElement) {
+                    uiCrystalCountElement.textContent = `${collectedCrystals} / ${TOTAL_EQUATIONS_TO_SOLVE}`;
+                    // Add "pop" animation
+                    uiCrystalCountElement.classList.add('collected');
+                    setTimeout(() => uiCrystalCountElement?.classList.remove('collected'), 300);
+                }
+
+                // Add the new crystal to the UI
+                if (uiCrystalTemplate && uiCrystalScene && uiCrystalCamera) {
+                    const newUICrystal = uiCrystalTemplate.clone();
+
+                    // Set its color
+                    newUICrystal.traverse((child) => {
+                        if ((child as THREE.Mesh).isMesh) {
+                            const mesh = child as THREE.Mesh;
+                            if (mesh.material) {
+                                // We must clone the material to have unique colors
+                                const newMaterial = (mesh.material as THREE.MeshStandardMaterial).clone();
+                                newMaterial.emissive = new THREE.Color(crystalColor);
+                                newMaterial.emissiveIntensity = 0.75;
+                                mesh.material = newMaterial;
+                            }
+                        }
+                    });
+
+                    // Calculate its position
+                    const rendererWidth = UI_CRYSTAL_SIZE * TOTAL_CRYSTALS;
+                    const camHeight = UI_CRYSTAL_CAM_HEIGHT;
+                    const camWidth = camHeight * (rendererWidth / UI_CRYSTAL_SIZE);
+                    const spacing = camWidth / TOTAL_CRYSTALS;
+
+                    newUICrystal.position.x = (-camWidth / 2) + (spacing / 2) + (crystalIndex * spacing) + 0.5;
+                    newUICrystal.position.y = -1.3;
+
+                    // Add to scene and array
+                    uiCrystalScene.add(newUICrystal);
+                    uiCrystalModels.push(newUICrystal);
+                }
+
+                // --- 5. Check for Win Condition ---
+                if (collectedCrystals === TOTAL_EQUATIONS_TO_SOLVE) {
+                    showWinScreen();
+                } else {
+                    // --- 6. Generate next puzzle ---
+                    // This is async, but we don't need to await it here
+                    // We must return from the function immediately
+                    generateNewEquationAndRespawnCrystals();
+                }
+
+                // IMPORTANT: Stop iterating because the arrays are now modified
+                return;
+
+            } else {
+                // --- Player collected the WRONG crystal ---
+
+                // 1. Trigger penalty (fall)
+                //triggerPlayerFall(500); // Short 0.5 sec fall
+
+                // 2. Play "error" sound
+                if (errorSound) {
+                    errorSound.stop();
+                    errorSound.play();
+                }
+
+                // 3. Do NOT remove the crystal, do not increment score.
             }
 
-            // --- 8. Check for Win Condition ---
-            if (collectedCrystals === TOTAL_CRYSTALS) {
-                showWinScreen();
-            }
+            // We can 'break' here since we processed a collision
+            // (prevents hitting multiple wrong crystals in one frame)
+            break;
         }
     }
 }
@@ -2380,7 +2570,7 @@ function updateCameraPosition(instant: boolean = false) {
 
 window.addEventListener("keydown", (event) => {
     // Stop all input if the game is won
-    if (collectedCrystals === TOTAL_CRYSTALS) {
+    if (collectedCrystals === TOTAL_EQUATIONS_TO_SOLVE) {
         keys[event.key] = false;
         return;
     }
@@ -2453,7 +2643,7 @@ function setupCrystalUI() {
     // Create the text element for the count
     uiCrystalCountElement = document.createElement('span');
     uiCrystalCountElement.id = 'crystal-count-text';
-    uiCrystalCountElement.textContent = `0 / ${TOTAL_CRYSTALS}`;
+    uiCrystalCountElement.textContent = `0 / ${TOTAL_EQUATIONS_TO_SOLVE}`;
     uiCrystalCountElement.style.color = 'white';
     uiCrystalCountElement.style.fontSize = '24px';
     uiCrystalCountElement.style.marginRight = '12px';
@@ -2488,6 +2678,39 @@ function setupCrystalUI() {
     uiCrystalScene.add(uiLight);
     const uiAmbient = new THREE.AmbientLight(0xffffff, 1.5);
     uiCrystalScene.add(uiAmbient);
+}
+
+/**
+ * Sets up the UI for displaying the current equation.
+ */
+function setupEquationUI() {
+    equationElement = document.createElement('div');
+    equationElement.id = 'equation-ui';
+    equationElement.style.position = 'absolute';
+    equationElement.style.top = '20px';
+    equationElement.style.left = '50%';
+    equationElement.style.transform = 'translateX(-50%)';
+    equationElement.style.zIndex = '1000';
+    equationElement.style.color = 'white';
+    equationElement.style.fontSize = '32px';
+    equationElement.style.fontFamily = 'Arial, sans-serif';
+    equationElement.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+    equationElement.style.padding = '10px 20px';
+    equationElement.style.borderRadius = '10px';
+    equationElement.style.textShadow = '2px 2px 4px #000000';
+    document.body.appendChild(equationElement);
+}
+
+/**
+ * Updates the equation UI text.
+ */
+function updateEquationUI() {
+    if (equationElement) {
+        equationElement.textContent = `Rozwiąż równanie: ${currentEquation}`;
+        // Add "pop" animation (reuses .collected style)
+        equationElement.classList.add('collected');
+        setTimeout(() => equationElement?.classList.remove('collected'), 300);
+    }
 }
 
 function updateLoadingBar(progress: number, text: string = 'Loading Game Assets...') {
@@ -2528,11 +2751,13 @@ function incrementLoadingProgress(stepName: string) {
 setupFpsCounter();
 setupLoadingBar();
 setupCrystalUI(); // Set up the UI elements before loading starts
+setupEquationUI(); // Set up the new equation UI
 
 const animalCount = 10;
 const spiderCount = 5;
 
-// Initialize loading with total steps: sun (1) + clouds (1) + player (2 steps) + world (2 steps) + 20 animals + 5 spiders + 10 crystals + UI
+// Initialize loading with total steps: sun (1) + clouds (1) + player (2 steps) + world (2 steps) + 10 animals + 5 spiders + 10 crystals + UI
+// The number of steps remains the same because spawnCrystals(10) is still called
 initializeLoading(1 + 1 + 2 + 2 + animalCount + spiderCount + TOTAL_CRYSTALS + 1);
 
 createSun().then(() => {
@@ -2546,9 +2771,10 @@ createSun().then(() => {
 }).then(() => {
     return spawnSpiders(spiderCount);
 }).then(() => {
-    return spawnCrystals(TOTAL_CRYSTALS);
+    return loadUICrystalTemplate(); // Load UI template first
 }).then(() => {
-    return loadUICrystalTemplate();
+    // Generate first equation and spawn first set of crystals
+    return generateNewEquationAndRespawnCrystals();
 });
 
 function animate() {
@@ -2601,7 +2827,10 @@ function animate() {
         }
 
         handlePlayerMovement();
-        checkCrystalCollection();
+        // Only check for collection if controls are not locked (prevents multiple triggers during 'fall')
+        if (!controlsLocked) {
+            checkCrystalCollection();
+        }
         updateSplashes(delta);
 
         for (const crystal of crystals) {
