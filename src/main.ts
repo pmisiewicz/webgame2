@@ -10,6 +10,7 @@ import animalHitSoundUrl from "/src/sfx/small-monster-attack-195712.mp3";
 import errorSoundUrl from "/src/sfx/wrong-answer-21-199825.mp3";
 import waterSplashSoundUrl from "/src/sfx/water-splash-02-352021.mp3";
 import successSoundUrl from "/src/sfx/success-340660.mp3";
+import beeFlyingSoundUrl from "/src/sfx/bee-flying-loop-42287.mp3";
 
 const scene = new THREE.Scene();
 const skyColor = 0x87ceeb;
@@ -74,7 +75,7 @@ let minimapWorldModel: THREE.Group | null = null;
 // Player marker - just a white arrow pointing forward
 const minimapPlayerArrow = new THREE.Mesh(
     new THREE.ConeGeometry(3, 8, 8),
-    new THREE.MeshBasicMaterial({ color: 0xffffff })
+    new THREE.MeshBasicMaterial({color: 0xffffff})
 );
 minimapPlayerArrow.rotation.x = Math.PI / 2; // Point the cone forward
 
@@ -86,6 +87,9 @@ minimapScene.add(minimapPlayerMarker);
 
 // Spider markers (no animal markers)
 const minimapSpiderMarkers: THREE.Mesh[] = [];
+
+// Bee markers
+const minimapBeeMarkers: THREE.Mesh[] = [];
 
 // Crystal markers
 const minimapCrystalMarkers: THREE.Mesh[] = [];
@@ -216,6 +220,39 @@ const SPIDER_COLLISION_RADIUS = 0.6;
 const SPIDER_JUMP_BACK_DISTANCE = 2;
 const SPIDER_JUMP_BACK_DURATION = 0.5;
 
+// Bee enemy system
+interface BeeInstance {
+    model: THREE.Group;
+    mixer: THREE.AnimationMixer | null;
+    flyAction: THREE.AnimationAction | null;
+    attackAction: THREE.AnimationAction | null;
+    flySound: THREE.PositionalAudio | null;
+    isChasing: boolean;
+    moveSpeed: number;
+    baseAltitude: number;
+    wanderTarget: THREE.Vector3 | null;
+    isAttacking: boolean;
+    lastAttackTime: number;
+    attackStartTime: number;
+    attackStartPos: THREE.Vector3 | null;
+    attackEndPos: THREE.Vector3 | null;
+    isRetreating: boolean;
+    retreatEndTime: number;
+}
+
+const bees: BeeInstance[] = [];
+const BEE_DETECTION_RANGE = 12;
+const BEE_CHASE_SPEED = 0.06;
+const BEE_WANDER_SPEED = 0.03;
+const BEE_COLLISION_RADIUS = 0.7;
+const BEE_SPAWN_ALTITUDE = 3.0;
+const BEE_MIN_ALTITUDE = 1.0;
+const BEE_BASE_WANDER_ALTITUDE = 3.0;
+const BEE_WANDER_RANGE = 20.0;
+const BEE_ATTACK_TRIGGER_DISTANCE = 2.0;
+const BEE_ATTACK_DASH_DURATION = 0.3;
+const BEE_ATTACK_COOLDOWN = 1.5;
+
 let mixer: THREE.AnimationMixer | null = null;
 let runAction: THREE.AnimationAction | null = null;
 let walkAction: THREE.AnimationAction | null = null;
@@ -295,7 +332,10 @@ function isWaterSurface(object: THREE.Object3D): boolean {
  * @param raycastHeight The height to start the raycast from (default: 10)
  * @returns Object containing groundY and hitObject, or null if no ground found
  */
-function getGroundHeight(position: THREE.Vector3, raycastHeight: number = 10): { groundY: number; hitObject: THREE.Mesh } | null {
+function getGroundHeight(position: THREE.Vector3, raycastHeight: number = 10): {
+    groundY: number;
+    hitObject: THREE.Mesh
+} | null {
     const groundCheckOrigin = position.clone();
     groundCheckOrigin.y += raycastHeight;
     const downVector = new THREE.Vector3(0, -1, 0);
@@ -403,6 +443,43 @@ function updateAndRenderMinimap(): void {
         marker.position.x = spider.model.position.x;
         marker.position.y = 50; // Same height as player marker
         marker.position.z = spider.model.position.z;
+    }
+
+    // Update bee markers
+    for (let i = 0; i < bees.length; i++) {
+        if (i >= minimapBeeMarkers.length) {
+            // Create new bee marker - yellow sphere with black ring
+            const marker = new THREE.Mesh(
+                new THREE.SphereGeometry(3, 16, 16),
+                new THREE.MeshBasicMaterial({
+                    color: 0xffff00, // Yellow
+                    transparent: true,
+                    opacity: 0.9
+                })
+            );
+
+            // Add black ring
+            const ring = new THREE.Mesh(
+                new THREE.RingGeometry(4, 5, 16),
+                new THREE.MeshBasicMaterial({
+                    color: 0x000000, // Black
+                    side: THREE.DoubleSide,
+                    transparent: true,
+                    opacity: 0.7
+                })
+            );
+            ring.rotation.x = -Math.PI / 2;
+            marker.add(ring);
+
+            minimapBeeMarkers.push(marker);
+            minimapScene.add(marker);
+        }
+        const bee = bees[i];
+        const marker = minimapBeeMarkers[i];
+        marker.position.x = bee.model.position.x;
+        // Bees are flying, so raise their marker slightly higher
+        marker.position.y = 60;
+        marker.position.z = bee.model.position.z;
     }
 
     // Update crystal markers - match crystal colors
@@ -783,7 +860,7 @@ async function spawnAnimals(count: number) {
 }
 
 async function spawnSpiders(count: number) {
-    const areaSize = 220;
+    const areaSize = 200;
     const spawnAttempts = 15;
     const MIN_DISTANCE_FROM_PLAYER = 50; // Minimum distance from player spawn point
     const playerStartPos = new THREE.Vector3(5, 0, 8); // Player starting position (y doesn't matter for distance check)
@@ -937,6 +1014,187 @@ async function spawnSpiders(count: number) {
     console.log(`Spawned ${spiders.length} spiders on the map`);
 }
 
+async function spawnBees(count: number) {
+    const areaSize = 200;
+    const spawnAttempts = 15;
+    const MIN_DISTANCE_FROM_PLAYER = 40;
+    const playerStartPos = new THREE.Vector3(5, 0, 8);
+
+    for (let i = 0; i < count; i++) {
+        try {
+            const {model, animations} = await loadModel("Armabee Evolved.glb");
+
+            incrementLoadingProgress(`Loading Bees... (${i + 1}/${count})`);
+
+            // Bee scale
+            const scaleFactor = 0.25;
+            model.scale.setScalar(scaleFactor);
+
+            // Random rotation
+            model.rotation.y = Math.random() * Math.PI * 2;
+
+            // Try to find a valid position
+            let validPosition = false;
+            let attempts = 0;
+
+            while (!validPosition && attempts < spawnAttempts) {
+                attempts++;
+
+                const x = (Math.random() - 0.5) * areaSize;
+                const z = (Math.random() - 0.5) * areaSize;
+                const y = 50; // Raycast from high up
+
+                // Check distance from player starting position
+                const spawnPos = new THREE.Vector3(x, 0, z);
+                const distanceFromPlayer = spawnPos.distanceTo(playerStartPos);
+
+                if (distanceFromPlayer < MIN_DISTANCE_FROM_PLAYER) {
+                    continue; // Too close to player, try again
+                }
+
+                // Raycast down to find ground
+                const origin = new THREE.Vector3(x, y, z);
+                raycaster.set(origin, down);
+                const intersects = raycaster.intersectObjects(worldObjects, true);
+
+                if (intersects.length > 0) {
+                    const groundY = intersects[0].point.y;
+                    const hitPoint = intersects[0].point;
+
+                    // Check for clearance *above* the ground, but *at* spawn height
+                    const clearanceHeight = 3.0; // Check 3m bubble around bee
+                    const clearanceOrigin = hitPoint.clone();
+                    clearanceOrigin.y = groundY + BEE_SPAWN_ALTITUDE; // Check at actual spawn height
+                    const upRay = new THREE.Vector3(0, 1, 0);
+                    raycaster.set(clearanceOrigin, upRay);
+                    raycaster.far = clearanceHeight;
+                    const clearanceIntersects = raycaster.intersectObjects(worldObjects, true);
+                    raycaster.far = Infinity;
+
+                    const hasClearance = clearanceIntersects.length === 0;
+                    const maxHeight = 15; // Ground height max
+
+                    // Bees can spawn over water, but check clearance and ground height
+                    if (hasClearance && groundY < maxHeight) {
+                        model.position.set(x, groundY + BEE_SPAWN_ALTITUDE, z);
+                        validPosition = true;
+                    }
+                }
+            }
+
+            if (!validPosition) {
+                model.position.set(0, BEE_SPAWN_ALTITUDE, 0); // Fallback
+            }
+
+            model.traverse((child) => {
+                if ((child as THREE.Mesh).isMesh) {
+                    const mesh = child as THREE.Mesh;
+                    mesh.castShadow = true;
+                    mesh.receiveShadow = true;
+                }
+            });
+
+            // Load bee flying sound
+            let beeFlySound: THREE.PositionalAudio | null = null;
+            if (listener) {
+                beeFlySound = new THREE.PositionalAudio(listener);
+                audioLoader.load(
+                    beeFlyingSoundUrl,
+                    function (buffer) {
+                        if (beeFlySound) {
+                            beeFlySound.setBuffer(buffer);
+                            beeFlySound.setLoop(true);
+                            beeFlySound.setVolume(0.8); // Adjust volume
+                            beeFlySound.setRefDistance(5); // Adjust distance
+                        }
+                    },
+                    undefined,
+                    (err) => {
+                        console.error("Error loading bee flying sound:", err);
+                    },
+                );
+                model.add(beeFlySound); // Add sound to the bee model
+            }
+
+            let beeMixer: THREE.AnimationMixer | null = null;
+            let beeFlyAction: THREE.AnimationAction | null = null;
+            let beeAttackAction: THREE.AnimationAction | null = null;
+
+            if (animations && animations.length > 0) {
+                beeMixer = new THREE.AnimationMixer(model);
+
+                // Find fly/idle animation
+                let flyClip = animations.find(clip => {
+                    const name = clip.name.toLowerCase();
+                    return name.includes('fly');
+                });
+                if (!flyClip) {
+                    flyClip = animations.find(clip => clip.name.toLowerCase().includes('idle'));
+                }
+
+                // Find attack animation
+                const attackClip = animations.find(clip => {
+                    const name = clip.name.toLowerCase();
+                    return name.includes('attack') || name.includes('bite');
+                });
+
+                if (flyClip) {
+                    beeFlyAction = beeMixer.clipAction(flyClip);
+                    beeFlyAction.setLoop(THREE.LoopRepeat, Infinity);
+                    beeFlyAction.play();
+                    console.log(`Bee playing animation "${flyClip.name}"`);
+                } else if (animations.length > 0) {
+                    // Just use the first animation if no fly/idle found
+                    beeFlyAction = beeMixer.clipAction(animations[0]);
+                    beeFlyAction.setLoop(THREE.LoopRepeat, Infinity);
+                    beeFlyAction.play();
+                    console.log(`Bee playing first animation "${animations[0].name}"`);
+                }
+
+                // Setup attack animation if available
+                if (attackClip) {
+                    beeAttackAction = beeMixer.clipAction(attackClip);
+                    beeAttackAction.setLoop(THREE.LoopOnce, 1);
+                    beeAttackAction.clampWhenFinished = true;
+                    console.log(`Bee attack animation "${attackClip.name}" ready`);
+                } else {
+                    console.log('No attack animation found for bee, will use first animation');
+                    if (animations.length > 0) {
+                        beeAttackAction = beeMixer.clipAction(animations[0]);
+                        beeAttackAction.setLoop(THREE.LoopOnce, 1);
+                        beeAttackAction.clampWhenFinished = true;
+                    }
+                }
+            }
+
+            scene.add(model);
+            bees.push({
+                model: model,
+                mixer: beeMixer,
+                flyAction: beeFlyAction,
+                attackAction: beeAttackAction,
+                flySound: beeFlySound,
+                isChasing: false,
+                moveSpeed: BEE_WANDER_SPEED,
+                baseAltitude: model.position.y,
+                wanderTarget: null,
+                isAttacking: false,
+                lastAttackTime: 0,
+                attackStartTime: 0,
+                attackStartPos: null,
+                attackEndPos: null,
+                isRetreating: false,
+                retreatEndTime: 0
+            });
+
+        } catch (err) {
+            console.warn(`Failed to load bee model:`, err);
+        }
+    }
+
+    console.log(`Spawned ${bees.length} bees on the map`);
+}
+
 function triggerSpiderAttack(spider: SpiderInstance) {
     if (spider.isAttacking || spider.isJumpingBack || !spider.attackAction || !spider.mixer) {
         return;
@@ -1018,6 +1276,59 @@ function updateSpiderJumpBack(spider: SpiderInstance) {
     }
 }
 
+function triggerBeeAttack(bee: BeeInstance) {
+    const currentTime = clock.getElapsedTime();
+    if (bee.isAttacking || currentTime < bee.lastAttackTime + BEE_ATTACK_COOLDOWN || !playerModel) {
+        return;
+    }
+
+    bee.isAttacking = true;
+    bee.lastAttackTime = currentTime;
+    bee.attackStartTime = currentTime;
+    bee.attackStartPos = bee.model.position.clone();
+    bee.attackEndPos = playerModel.position.clone().add(new THREE.Vector3(0, playerHeight / 2, 0)); // Target player center
+
+    if (bee.flyAction && bee.flyAction.isRunning()) {
+        bee.flyAction.stop();
+    }
+    if (bee.attackAction) {
+        bee.attackAction.reset().play();
+    }
+
+    console.log('Bee attacking!');
+}
+
+function updateBeeAttackDash(bee: BeeInstance) {
+    if (!bee.isAttacking || !bee.attackStartPos || !bee.attackEndPos) {
+        return;
+    }
+
+    const currentTime = clock.getElapsedTime();
+    const elapsed = currentTime - bee.attackStartTime;
+    let progress = elapsed / BEE_ATTACK_DASH_DURATION;
+
+    if (progress >= 1) {
+        progress = 1;
+        bee.isAttacking = false;
+        bee.attackStartPos = null;
+        bee.attackEndPos = null;
+
+        if (bee.attackAction && bee.attackAction.isRunning()) {
+            bee.attackAction.stop();
+        }
+        if (bee.flyAction && !bee.flyAction.isRunning()) {
+            bee.flyAction.reset().play();
+        }
+    }
+
+    if (bee.attackStartPos && bee.attackEndPos) {
+        // Ease-out interpolation for the dash
+        const easeProgress = 1 - Math.pow(1 - progress, 3);
+        const currentPos = bee.attackStartPos.clone().lerp(bee.attackEndPos, easeProgress);
+        bee.model.position.copy(currentPos);
+    }
+}
+
 // Crystal system
 const crystals: THREE.Group[] = [];
 
@@ -1071,7 +1382,7 @@ function createCrystalNumber(text: string, color: THREE.Color): THREE.Sprite { /
     const sprite = new THREE.Sprite(material);
 
     // Set the size. This is in local space (like the plane was).
-    // When parented to the crystal (scale 0.1), this will be 1x1 world units.
+    // When parented to the crystal (scale 0.1), this will be 10x10 world units.
     sprite.scale.set(10, 10, 1);
 
     return sprite;
@@ -1987,7 +2298,7 @@ function updateSpiderAI(spider: SpiderInstance) {
             const groundResult = getGroundHeight(newPosition);
 
             if (groundResult) {
-                const { groundY, hitObject } = groundResult;
+                const {groundY, hitObject} = groundResult;
 
                 // Spiders can walk on steep surfaces - only check for water
                 const isWater = isWaterSurface(hitObject);
@@ -2066,7 +2377,7 @@ function updateSpiderAI(spider: SpiderInstance) {
                 const groundResult = getGroundHeight(newPosition);
 
                 if (groundResult) {
-                    const { groundY, hitObject } = groundResult;
+                    const {groundY, hitObject} = groundResult;
 
                     // Spiders can walk on steep surfaces - only check for water
                     const isWater = isWaterSurface(hitObject);
@@ -2081,6 +2392,178 @@ function updateSpiderAI(spider: SpiderInstance) {
                 }
             }
         }
+    }
+}
+
+/**
+ * Handles the wandering behavior for a bee.
+ * @param bee The bee instance
+ */
+function forceBeeWander(bee: BeeInstance) {
+    bee.isChasing = false;
+    bee.moveSpeed = BEE_WANDER_SPEED;
+
+    // Stop flying sound
+    if (bee.flySound && bee.flySound.isPlaying) {
+        bee.flySound.stop();
+    }
+
+    // Check if wander target is reached or null
+    if (!bee.wanderTarget || bee.model.position.distanceTo(bee.wanderTarget) < 2.0) {
+        // Generate new wander target
+        const x = bee.model.position.x + (Math.random() - 0.5) * BEE_WANDER_RANGE;
+        const z = bee.model.position.z + (Math.random() - 0.5) * BEE_WANDER_RANGE;
+
+        // Find ground height at new (x, z)
+        let groundY = 0;
+        const groundResult = getGroundHeight(new THREE.Vector3(x, 50, z));
+        if (groundResult) {
+            groundY = groundResult.groundY;
+        }
+
+        const y = groundY + BEE_BASE_WANDER_ALTITUDE + (Math.random() - 0.5) * 5.0; // Vary altitude
+
+        if (!bee.wanderTarget) {
+            bee.wanderTarget = new THREE.Vector3(x, y, z);
+        } else {
+            bee.wanderTarget.set(x, y, z);
+        }
+    }
+
+    // Move towards wander target
+    const beePos = bee.model.position; // Need to define beePos
+    const direction = new THREE.Vector3().subVectors(bee.wanderTarget, beePos);
+    direction.normalize();
+
+    bee.model.lookAt(bee.wanderTarget);
+
+    const moveVector = direction.multiplyScalar(bee.moveSpeed);
+    const newPosition = beePos.clone().add(moveVector);
+
+    bee.model.position.copy(newPosition);
+}
+
+function updateBeeAI(bee: BeeInstance) {
+    if (!playerModel) return;
+
+    // Handle attack dash logic first
+    if (bee.isAttacking) {
+        updateBeeAttackDash(bee);
+        return;
+    }
+
+    // Handle retreat logic
+    if (bee.isRetreating) {
+        const currentTime = clock.getElapsedTime();
+        if (currentTime < bee.retreatEndTime) {
+            // Bee is retreating.
+
+            // Fly away for the first 1.5 seconds
+            const retreatDuration = 5.0;
+            const flyAwayDuration = 1.5;
+            const elapsedRetreatTime = retreatDuration - (bee.retreatEndTime - currentTime);
+
+            if (elapsedRetreatTime < flyAwayDuration) {
+                // Fly directly away from player
+                const beePos = bee.model.position;
+                const playerPos = playerModel.position.clone().add(new THREE.Vector3(0, playerHeight / 2, 0));
+                const directionAway = new THREE.Vector3().subVectors(beePos, playerPos);
+                directionAway.y = 0.5; // Fly up and away
+                directionAway.normalize();
+
+                bee.model.lookAt(bee.model.position.clone().add(directionAway)); // Look where it's going
+
+                const moveVector = directionAway.multiplyScalar(BEE_CHASE_SPEED); // Retreat quickly
+                const newPosition = beePos.clone().add(moveVector);
+
+                // Check ground height to avoid flying into ground
+                const groundResult = getGroundHeight(newPosition, 20);
+                if (groundResult) {
+                    const {groundY} = groundResult;
+                    if (newPosition.y < groundY + BEE_MIN_ALTITUDE) {
+                        newPosition.y = groundY + BEE_MIN_ALTITUDE;
+                    }
+                }
+                bee.model.position.copy(newPosition);
+
+            } else {
+                // After 1.5s, just wander
+                forceBeeWander(bee);
+            }
+
+            return; // Do not proceed to chasing logic
+        } else {
+            // Retreat time is over
+            bee.isRetreating = false;
+        }
+    }
+
+    const beePos = bee.model.position;
+    const playerPos = playerModel.position.clone().add(new THREE.Vector3(0, playerHeight / 2, 0)); // Target player center
+    const distanceToPlayer = beePos.distanceTo(playerPos);
+
+    // Check if player is in detection range
+    if (distanceToPlayer < BEE_DETECTION_RANGE) {
+        bee.isChasing = true;
+        bee.moveSpeed = BEE_CHASE_SPEED;
+
+        // Play flying sound
+        if (bee.flySound && !bee.flySound.isPlaying) {
+            bee.flySound.play();
+        }
+
+        // Calculate 3D direction to player
+        const direction = new THREE.Vector3().subVectors(playerPos, beePos);
+        direction.normalize();
+
+        // Rotate bee to face player
+        bee.model.lookAt(playerPos);
+
+        // Check current distance to player
+        const attackTriggerDistance = BEE_ATTACK_TRIGGER_DISTANCE;
+
+        // If within attack range, trigger attack
+        if (distanceToPlayer <= attackTriggerDistance) {
+            if (!bee.isAttacking && playerModel && !controlsLocked) {
+                // Trigger bee attack dash
+                triggerBeeAttack(bee);
+
+                // Make player fall
+                triggerPlayerFall();
+
+                // Make bee retreat
+                if (!bee.isRetreating) {
+                    bee.isRetreating = true;
+                    bee.retreatEndTime = clock.getElapsedTime() + 5.0; // 5 second retreat
+                    bee.isChasing = false;
+                    bee.wanderTarget = null; // Force new wander target on next wander
+                }
+
+                // Play hit sound
+                if (biteSound && !biteSound.isPlaying) {
+                    biteSound.play();
+                }
+            }
+        } else {
+            // Move towards player if not in attack range
+            const moveVector = direction.multiplyScalar(bee.moveSpeed);
+            const newPosition = beePos.clone().add(moveVector);
+
+            // Simple obstacle avoidance: check ground height below *future* position
+            const groundResult = getGroundHeight(newPosition, 20); // Raycast from higher up
+            if (groundResult) {
+                const {groundY} = groundResult;
+                // Ensure bee stays a minimum height above the ground
+                if (newPosition.y < groundY + BEE_MIN_ALTITUDE) {
+                    newPosition.y = groundY + BEE_MIN_ALTITUDE;
+                }
+            }
+
+            bee.model.position.copy(newPosition);
+        }
+    } else {
+        // Wander behavior when player is far
+        forceBeeWander(bee);
     }
 }
 
@@ -2192,7 +2675,22 @@ function handlePlayerMovement() {
             }
         }
 
-        if (heightDifference > MAX_STEP_HEIGHT || hitWall || hitAnimal || hitSpider) {
+        // Check collision with bees
+        let hitBee = false;
+        let collidedBee: BeeInstance | null = null;
+        const beeCombinedRadius = COLLISION_RADIUS + BEE_COLLISION_RADIUS;
+
+        for (const bee of bees) {
+            // Check 3D distance for bees
+            const futureDistance = targetPosition.distanceTo(bee.model.position);
+            if (futureDistance < beeCombinedRadius) {
+                hitBee = true;
+                collidedBee = bee;
+                break;
+            }
+        }
+
+        if (heightDifference > MAX_STEP_HEIGHT || hitWall || hitAnimal || hitSpider || hitBee) {
             const failedMovementVector = targetPosition
                 .clone()
                 .sub(originalPosition);
@@ -2209,8 +2707,35 @@ function handlePlayerMovement() {
 
             moving = false;
 
+            // Handle bee collision - player falls
+            if (hitBee) {
+                // Make player fall
+                triggerPlayerFall();
+
+                // Make bee retreat
+                if (collidedBee && !collidedBee.isRetreating) {
+                    collidedBee.isRetreating = true;
+                    collidedBee.retreatEndTime = clock.getElapsedTime() + 5.0; // 5 second retreat
+                    collidedBee.isAttacking = false; // Stop any active attack dash
+                    collidedBee.isChasing = false;
+                    collidedBee.wanderTarget = null; // Force new wander target on next wander
+
+                    // Switch animations
+                    if (collidedBee.attackAction && collidedBee.attackAction.isRunning()) {
+                        collidedBee.attackAction.stop();
+                    }
+                    if (collidedBee.flyAction && !collidedBee.flyAction.isRunning()) {
+                        collidedBee.flyAction.reset().play();
+                    }
+                }
+
+                // Play hit sound
+                if (biteSound && !biteSound.isPlaying) {
+                    biteSound.play();
+                }
+            }
             // Handle spider collision - player falls
-            if (hitSpider) {
+            else if (hitSpider) {
                 // Make player fall
                 triggerPlayerFall();
 
@@ -2809,11 +3334,11 @@ setupCrystalUI(); // Set up the UI elements before loading starts
 setupEquationUI(); // Set up the new equation UI
 
 const animalCount = 10;
-const spiderCount = 5;
+const spiderCount = 3;
+const beeCount = 3;
 
-// Initialize loading with total steps: sun (1) + clouds (1) + player (2 steps) + world (2 steps) + 10 animals + 5 spiders + 10 crystals + UI
-// The number of steps remains the same because spawnCrystals(10) is still called
-initializeLoading(1 + 1 + 2 + 2 + animalCount + spiderCount + TOTAL_CRYSTALS + 1);
+// Initialize loading with total steps: sun (1) + clouds (1) + player (2 steps) + world (2 steps) + animals + spiders + bees + crystals + UI
+initializeLoading(1 + 1 + 2 + 2 + animalCount + spiderCount + beeCount + TOTAL_CRYSTALS + 1);
 
 createSun().then(() => {
     return createClouds();
@@ -2825,6 +3350,8 @@ createSun().then(() => {
     return spawnAnimals(animalCount);
 }).then(() => {
     return spawnSpiders(spiderCount);
+}).then(() => {
+    return spawnBees(beeCount); // Add spawnBees to the chain
 }).then(() => {
     return loadUICrystalTemplate(); // Load UI template first
 }).then(() => {
@@ -2881,6 +3408,14 @@ function animate() {
             updateSpiderJumpBack(spider);
         }
 
+        // Update bees
+        for (const bee of bees) {
+            if (bee.mixer) {
+                bee.mixer.update(delta);
+            }
+            updateBeeAI(bee);
+        }
+
         handlePlayerMovement();
         // Only check for collection if controls are not locked (prevents multiple triggers during 'fall')
         if (!controlsLocked) {
@@ -2922,7 +3457,7 @@ function animate() {
         // Update and render Crystal UI
         if (uiCrystalRenderer && uiCrystalScene && uiCrystalCamera) {
             // Slowly rotate all collected crystals
-            for(const model of uiCrystalModels) {
+            for (const model of uiCrystalModels) {
                 model.rotation.y += 0.01;
             }
             uiCrystalRenderer.render(uiCrystalScene, uiCrystalCamera);
