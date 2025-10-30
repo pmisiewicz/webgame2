@@ -1107,8 +1107,6 @@ async function spawnCrystals(count: number) {
                 0xff3333, // Red
                 0xff66ff, // Pink
                 0xffff00, // Yellow
-                0xff8800, // Orange
-                0xaa00ff  // Purple
             ];
             const randomColor = colorPalette[Math.floor(Math.random() * colorPalette.length)];
 
@@ -2605,6 +2603,10 @@ function animate() {
         handlePlayerMovement();
         checkCrystalCollection();
         updateSplashes(delta);
+
+        for (const crystal of crystals) {
+            crystal.rotation.y += 0.01;
+        }
 
         updateCameraPosition();
 
