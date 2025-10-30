@@ -36,7 +36,7 @@ renderer.shadowMap.type = THREE.PCFShadowMap;
 document.body.appendChild(renderer.domElement);
 
 // Minimap setup - 3D renderer with top-down view
-const MINIMAP_SIZE = 200;
+const MINIMAP_SIZE = 250;
 const minimapRenderer = new THREE.WebGLRenderer({antialias: true, alpha: true});
 minimapRenderer.setSize(MINIMAP_SIZE, MINIMAP_SIZE);
 minimapRenderer.domElement.style.position = 'absolute';
@@ -122,14 +122,6 @@ dirLight.shadow.mapSize.width = 2048;
 dirLight.shadow.mapSize.height = 2048;
 scene.add(dirLight);
 scene.add(dirLight.target);
-
-const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(1000, 1000),
-    new THREE.MeshStandardMaterial({color: 0x47a24c}),
-);
-ground.rotation.x = -Math.PI / 2;
-ground.receiveShadow = true;
-scene.add(ground);
 
 const loader = new GLTFLoader();
 
@@ -233,7 +225,7 @@ const MAX_JUMPS = 2;
 let jumpsRemaining = MAX_JUMPS;
 let bumpSoundPlayed = false;
 
-const FPS_LIMIT = 60;
+const FPS_LIMIT = 100;
 const interval = 1000 / FPS_LIMIT;
 let then = performance.now();
 
@@ -1123,8 +1115,8 @@ async function spawnCrystals(count: number) {
             model.traverse((child) => {
                 if ((child as THREE.Mesh).isMesh) {
                     const mesh = child as THREE.Mesh;
-                    mesh.castShadow = true;
-                    mesh.receiveShadow = true;
+                    mesh.castShadow = false;
+                    mesh.receiveShadow = false;
 
                     if (mesh.material) {
                         const material = mesh.material as THREE.MeshStandardMaterial;
