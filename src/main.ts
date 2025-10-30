@@ -37,8 +37,10 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
 document.body.appendChild(renderer.domElement);
 
+const isMobile = window.matchMedia('(pointer: coarse)').matches;
+
 // Minimap setup - 3D renderer with top-down view
-const MINIMAP_SIZE = 250;
+const MINIMAP_SIZE = isMobile ? 120 : 250;
 const minimapRenderer = new THREE.WebGLRenderer({antialias: true, alpha: true});
 minimapRenderer.setSize(MINIMAP_SIZE, MINIMAP_SIZE);
 minimapRenderer.domElement.style.position = 'absolute';
@@ -3448,7 +3450,7 @@ function setupEquationUI() {
     equationElement.style.transform = 'translateX(-50%)';
     equationElement.style.zIndex = '1000';
     equationElement.style.color = 'white';
-    equationElement.style.fontSize = '45px';
+    equationElement.style.fontSize = isMobile ? '24px' : '45px';
     equationElement.style.fontFamily = 'Arial, sans-serif';
     equationElement.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
     equationElement.style.padding = '10px 20px';
