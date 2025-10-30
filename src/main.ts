@@ -795,7 +795,7 @@ async function spawnSpiders(count: number) {
             incrementLoadingProgress(`Loading Spiders... (${i + 1}/${count})`);
 
             // Spider scale
-            const scaleFactor = 0.5;
+            const scaleFactor = 0.33;
             model.scale.setScalar(scaleFactor);
 
             // Random rotation
