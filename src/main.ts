@@ -1150,7 +1150,7 @@ async function generateNewEquationAndRespawnCrystals() {
     // Add distractor answers
     while (numbersToSpawn.length < TOTAL_CRYSTALS) {
         // Generate distractors in a similar range (e.g., 2 to 18)
-        const distractor = Math.floor(Math.random() * 17) + 2;
+        const distractor = Math.floor(Math.random() * 10) + 1;
         if (distractor !== currentTargetNumber) {
             numbersToSpawn.push(distractor);
         }
@@ -1421,7 +1421,7 @@ function loadAudio() {
             if (errorSound) {
                 errorSound.setBuffer(buffer);
                 errorSound.setLoop(false);
-                errorSound.setVolume(2);
+                errorSound.setVolume(1);
                 errorSound.setRefDistance(10);
             }
         },
@@ -1430,7 +1430,7 @@ function loadAudio() {
             console.error("Error loading error sound:", err);
         },
     );
-    playerModel.add(biteSound);
+    playerModel.add(errorSound);
 
     // Load water splash sound
     waterSplashSound = new THREE.PositionalAudio(listener);
@@ -2630,8 +2630,8 @@ function setupCrystalUI() {
     const container = document.createElement('div');
     container.id = 'crystal-ui-container';
     container.style.position = 'absolute';
-    container.style.top = '20px';
-    container.style.right = '20px';
+    container.style.bottom = '20px';
+    container.style.left = '20px';
     container.style.zIndex = '1000';
     container.style.display = 'flex';
     container.style.alignItems = 'center';
@@ -2687,12 +2687,12 @@ function setupEquationUI() {
     equationElement = document.createElement('div');
     equationElement.id = 'equation-ui';
     equationElement.style.position = 'absolute';
-    equationElement.style.top = '20px';
+    equationElement.style.top = '50px';
     equationElement.style.left = '50%';
     equationElement.style.transform = 'translateX(-50%)';
     equationElement.style.zIndex = '1000';
     equationElement.style.color = 'white';
-    equationElement.style.fontSize = '32px';
+    equationElement.style.fontSize = '45px';
     equationElement.style.fontFamily = 'Arial, sans-serif';
     equationElement.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
     equationElement.style.padding = '10px 20px';
