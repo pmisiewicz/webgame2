@@ -3075,6 +3075,10 @@ function showWinScreen() {
     controlsLocked = true;
     stopPlayerActions();
 
+    if (equationElement) {
+        equationElement.style.display = 'none';
+    }
+
     if (backgroundMusic && backgroundMusic.isPlaying) {
         backgroundMusic.stop();
     }
@@ -3217,6 +3221,7 @@ function checkCrystalCollection() {
 
                 // --- 5. Check for Win Condition ---
                 if (collectedCrystals === TOTAL_EQUATIONS_TO_SOLVE) {
+                    clearAllCrystals();
                     showWinScreen();
                 } else {
                     // --- 6. Generate next puzzle ---
