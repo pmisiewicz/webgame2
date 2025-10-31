@@ -166,6 +166,7 @@ const fpsInterval = 1000;
 // Loading
 let totalLoadingSteps = 0;
 let completedLoadingSteps = 0;
+let loadingHideScheduled = false;
 
 // --- ENTITY INTERFACES ---
 
@@ -524,11 +525,11 @@ function setupLoadingBar() {
             <div><strong>⬇️ lub S</strong> - tył</div>
             <div><strong>⬅️ lub A</strong> - lewo</div>
             <div><strong>➡️ lub D</strong> - prawo</div>
-            <div><strong>Spacja - skok</strong></div>
+            <div><strong>Spacja</strong> - skok</div>
             <div><strong>Shift</strong> - sprint</div>
         </div>
         
-        <div id="loading-text">Loading Game Assets...</div>
+        <div id="loading-text">Ładowanie...</div>
 
         <div id="loading-bar-bg">
             <div id="loading-bar-fill"></div>
@@ -614,7 +615,7 @@ function updateEquationUI() {
     }
 }
 
-function updateLoadingBar(progress: number, text: string = 'Loading Game Assets...') {
+function updateLoadingBar(progress: number, text: string = 'Ładowanie...') {
     const container = document.getElementById('loading-container');
     const fill = document.getElementById('loading-bar-fill');
     const percentage = document.getElementById('loading-percentage');
@@ -624,20 +625,21 @@ function updateLoadingBar(progress: number, text: string = 'Loading Game Assets.
     if (percentage) percentage.textContent = `${Math.round(progress)}%`;
     if (loadingText) loadingText.textContent = text;
 
-    if (progress >= 100 && container) {
+    if (progress >= 100 && container && !loadingHideScheduled) {
+        loadingHideScheduled = true;
         setTimeout(() => {
             container.classList.add('hidden');
             setTimeout(() => {
                 container.remove();
             }, 500);
-        }, 300);
+        }, 1000);
     }
 }
 
 function initializeLoading(steps: number) {
     totalLoadingSteps = steps;
     completedLoadingSteps = 0;
-    updateLoadingBar(0, 'Loading Game Assets...');
+    updateLoadingBar(0, 'Ładowanie...');
 }
 
 function incrementLoadingProgress(stepName: string) {
@@ -755,7 +757,7 @@ function updateSplashes(delta: number) {
 // --- ENTITY CREATION ---
 
 async function createSun() {
-    incrementLoadingProgress('Creating Sun...');
+    incrementLoadingProgress('Ładowanie Słońca...');
     const sunGroup = new THREE.Group();
     const sunMaterial = new THREE.MeshBasicMaterial({color: 0xfdb813});
     const sun = new THREE.Mesh(new THREE.SphereGeometry(8, 32, 32), sunMaterial);
@@ -799,7 +801,7 @@ function createCloud(): THREE.Group {
 }
 
 async function createClouds() {
-    incrementLoadingProgress('Creating Clouds...');
+    incrementLoadingProgress('Ładowanie chmur...');
     const cloudCount = 25;
     const areaSize = 250;
     const altitude = 25;
@@ -820,7 +822,7 @@ async function createClouds() {
 async function createWorld() {
     try {
         const {model} = await loadModel("Nature.glb");
-        incrementLoadingProgress('Loading World...');
+        incrementLoadingProgress('Ładowanie mapy...');
 
         model.scale.setScalar(50);
         model.position.set(0, 10, 0);
@@ -845,15 +847,15 @@ async function createWorld() {
         minimapWorldModel.position.set(0, 10, 0);
         minimapScene.add(minimapWorldModel);
 
-        incrementLoadingProgress('World Loaded');
+        incrementLoadingProgress('Mapa załadowana');
     } catch (err) {
         console.warn("Błąd ładowania modelu Nature.glb:", err);
-        incrementLoadingProgress('World Load Failed');
+        incrementLoadingProgress('Błąd ładowania mapy');
     }
 }
 
 async function loadUICrystalTemplate() {
-    incrementLoadingProgress('Loading UI...');
+    incrementLoadingProgress('Ładowanie interfejsu gry...');
     try {
         const {model} = await loadModel("Crystal.glb");
         uiCrystalTemplate = model;
@@ -914,7 +916,7 @@ async function loadAudio() {
 
 async function createPlayer() {
     try {
-        incrementLoadingProgress('Loading Player...');
+        incrementLoadingProgress('Ładowanie postaci...');
         const {model, animations} = await loadModel("Animated Platformer Character.glb");
         playerModel = model;
 
@@ -962,11 +964,11 @@ async function createPlayer() {
                 });
             }
         }
-        incrementLoadingProgress('Player Loaded');
+        incrementLoadingProgress('Postać załadowana');
         updateCameraPosition(true);
     } catch (err) {
         console.warn("Błąd ładowania modelu 'Animated Platformer Character.glb':", err);
-        incrementLoadingProgress('Player Load Failed');
+        incrementLoadingProgress('Błąd ładowania postaci');
     }
 }
 
@@ -980,7 +982,7 @@ async function spawnAnimals(count: number) {
         const randomAnimalModel = animalModels[Math.floor(Math.random() * animalModels.length)];
         try {
             const {model, animations} = await loadModel(randomAnimalModel);
-            incrementLoadingProgress(`Loading Animals... (${i + 1}/${count})`);
+            incrementLoadingProgress(`Ładowanie zwierząt... (${i + 1}/${count})`);
 
             const scaleFactor = 0.4 + Math.random() * 0.3;
             model.scale.setScalar(scaleFactor);
@@ -1050,7 +1052,7 @@ async function spawnSpiders(count: number) {
     for (let i = 0; i < count; i++) {
         try {
             const {model, animations} = await loadModel("Spider.glb");
-            incrementLoadingProgress(`Loading Spiders... (${i + 1}/${count})`);
+            incrementLoadingProgress(`Ładowanie Pajączurów... (${i + 1}/${count})`);
 
             model.scale.setScalar(0.33);
             model.rotation.y = Math.random() * Math.PI * 2;
@@ -1117,7 +1119,7 @@ async function spawnBees(count: number) {
     for (let i = 0; i < count; i++) {
         try {
             const {model, animations} = await loadModel("Armabee Evolved.glb");
-            incrementLoadingProgress(`Loading Bees... (${i + 1}/${count})`);
+            incrementLoadingProgress(`Ładowanie Żarłocznych Pszczół... (${i + 1}/${count})`);
 
             model.scale.setScalar(0.25);
             model.rotation.y = Math.random() * Math.PI * 2;
@@ -1206,7 +1208,7 @@ async function spawnCrystals(numbersToSpawn: number[]) {
     for (let i = 0; i < numbersToSpawn.length; i++) {
         try {
             const {model} = await loadModel("Crystal.glb");
-            incrementLoadingProgress(`Spawning Crystals... (${i + 1}/${numbersToSpawn.length})`);
+            incrementLoadingProgress(`Ładowanie Magicznych Kryształów... (${i + 1}/${numbersToSpawn.length})`);
 
             model.scale.setScalar(0.1);
             model.rotation.y = Math.random() * Math.PI * 2;
