@@ -12,6 +12,7 @@ import waterSplashSoundUrl from "/src/sfx/water-splash-02-352021.mp3";
 import successSoundUrl from "/src/sfx/success-340660.mp3";
 import beeFlyingSoundUrl from "/src/sfx/bee-flying-loop-42287.mp3";
 import fireworkSoundUrl from "/src/sfx/firework.mp3";
+import wormMovementSoundUrl from "/src/sfx/worm-movement-277577.mp3";
 
 // --- CONSTANTS ---
 
@@ -148,6 +149,7 @@ let waterSplashSound: THREE.PositionalAudio | null = null;
 let backgroundMusic: THREE.Audio | THREE.PositionalAudio;
 let successSound: THREE.Audio | THREE.PositionalAudio;
 let fireworkBuffer: AudioBuffer | null = null;
+let wormBuffer: AudioBuffer | null = null;
 
 // Game Logic
 let collectedCrystals = 0;
@@ -205,6 +207,7 @@ interface SpiderInstance {
     jumpBackDuration: number;
     jumpBackStartPos: THREE.Vector3 | null;
     jumpBackEndPos: THREE.Vector3 | null;
+    approachSound?: THREE.PositionalAudio | null;
 }
 
 const spiders: SpiderInstance[] = [];
@@ -909,6 +912,12 @@ async function loadAudio() {
 
         fireworkBuffer = await audioLoader.loadAsync(fireworkSoundUrl);
 
+        try {
+            wormBuffer = await audioLoader.loadAsync(wormMovementSoundUrl);
+        } catch (err) {
+            console.warn("Failed to load worm movement sound:", err);
+            wormBuffer = null;
+        }
     } catch (err) {
         console.error("One or more audio files failed to load:", err);
     }
@@ -1724,9 +1733,23 @@ function updateSpiderAI(spider: SpiderInstance) {
     const playerPos = playerModel.position;
     const distanceToPlayer = spiderPos.distanceTo(playerPos);
 
+    const wasChasing = spider.isChasing;
     if (distanceToPlayer < SPIDER_DETECTION_RANGE) {
         spider.isChasing = true;
         spider.moveSpeed = SPIDER_CHASE_SPEED;
+
+        if (!spider.approachSound && wormBuffer && listener) {
+            const s = new THREE.PositionalAudio(listener);
+            s.setBuffer(wormBuffer);
+            s.setLoop(true);
+            s.setRefDistance(8);
+            s.setVolume(0.6);
+            spider.model.add(s);
+            spider.approachSound = s;
+            try { s.play(); } catch (e) { /* play may fail if not resumed by user gesture */ }
+        } else if (spider.approachSound && !spider.approachSound.isPlaying) {
+            try { spider.approachSound.play(); } catch (e) { /* ignore */ }
+        }
 
         const direction = new THREE.Vector3().subVectors(playerPos, spiderPos);
         direction.y = 0;
@@ -1749,6 +1772,9 @@ function updateSpiderAI(spider: SpiderInstance) {
             }
         }
     } else {
+        if (spider.approachSound && spider.approachSound.isPlaying) {
+            try { spider.approachSound.stop(); } catch (e) { /* ignore */ }
+        }
         spider.isChasing = false;
         spider.moveSpeed = SPIDER_WANDER_SPEED;
         const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(spider.model.quaternion);
@@ -1797,6 +1823,10 @@ function updateSpiderAI(spider: SpiderInstance) {
                 }
             }
         }
+    }
+
+    if (!wasChasing && spider.isChasing) {
+        // already handled above
     }
 }
 
