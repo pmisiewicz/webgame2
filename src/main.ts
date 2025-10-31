@@ -11,7 +11,7 @@ import errorSoundUrl from "/src/sfx/wrong-answer-21-199825.mp3";
 import waterSplashSoundUrl from "/src/sfx/water-splash-02-352021.mp3";
 import successSoundUrl from "/src/sfx/success-340660.mp3";
 import beeFlyingSoundUrl from "/src/sfx/bee-flying-loop-42287.mp3";
-import fireworkSoundUrl from "/src/sfx/firework.mp3"; // <-- ADDED
+import fireworkSoundUrl from "/src/sfx/firework.mp3";
 
 const scene = new THREE.Scene();
 const skyColor = 0x87ceeb;
@@ -146,12 +146,12 @@ const loader = new GLTFLoader();
 let runningSound: THREE.PositionalAudio | null = null;
 let waterSound: THREE.PositionalAudio | null = null;
 let bumpSound: THREE.PositionalAudio | null = null;
-let backgroundMusic: THREE.Audio | null = null;
 let biteSound: THREE.PositionalAudio | null = null;
 let errorSound: THREE.PositionalAudio | null = null;
 let waterSplashSound: THREE.PositionalAudio | null = null;
-let successSound: THREE.Audio | null = null;
-let fireworkBuffer: AudioBuffer | null = null; // <-- ADDED
+let backgroundMusic: THREE.Audio | THREE.PositionalAudio;
+let successSound: THREE.Audio | THREE.PositionalAudio;
+let fireworkBuffer: AudioBuffer | null = null;
 
 let playerModel: THREE.Group | null = null;
 const RUN_SPEED = 1.2;
@@ -176,7 +176,6 @@ function clearAllKeys() {
 const tempBumpVector = new THREE.Vector3();
 
 const raycaster = new THREE.Raycaster();
-const down = new THREE.Vector3(0, -1, 0);
 
 const worldObjects: THREE.Mesh[] = [];
 
@@ -343,15 +342,12 @@ function isWaterSurface(object: THREE.Object3D): boolean {
 }
 
 /**
- * Gets the ground height at a given position using raycasting.
- * @param position The position to check
- * @param raycastHeight The height to start the raycast from (default: 10)
- * @returns Object containing groundY and hitObject, or null if no ground found
+ * Gets the first intersection with the world geometry by raycasting down.
+ * @param position The (x, z) position to check.
+ * @param raycastHeight The height above the position's y-level to start the raycast from.
+ * @returns The full THREE.Intersection object, or null if no ground found.
  */
-function getGroundHeight(position: THREE.Vector3, raycastHeight: number = 10): {
-    groundY: number;
-    hitObject: THREE.Mesh
-} | null {
+function getGroundIntersection(position: THREE.Vector3, raycastHeight: number = 10): THREE.Intersection | null {
     const groundCheckOrigin = position.clone();
     groundCheckOrigin.y += raycastHeight;
     const downVector = new THREE.Vector3(0, -1, 0);
@@ -360,13 +356,44 @@ function getGroundHeight(position: THREE.Vector3, raycastHeight: number = 10): {
     const groundIntersects = raycaster.intersectObjects(worldObjects, true);
 
     if (groundIntersects.length > 0) {
-        return {
-            groundY: groundIntersects[0].point.y,
-            hitObject: groundIntersects[0].object as THREE.Mesh
-        };
+        return groundIntersects[0]; // Return the full intersection
     }
     return null;
 }
+
+/**
+ * Loads an audio buffer from a URL and creates a THREE.Audio or THREE.PositionalAudio object.
+ * @param url The URL of the audio file.
+ * @param isPositional Whether to create a PositionalAudio object.
+ * @param listener The main AudioListener.
+ * @param options Configuration for loop, volume, and refDistance.
+ * @returns A Promise that resolves to the configured audio object.
+ */
+async function createAudioFromUrl(
+    url: string,
+    isPositional: boolean,
+    listener: THREE.AudioListener,
+    options: { loop?: boolean; volume?: number; refDistance?: number } = {}
+): Promise<THREE.Audio | THREE.PositionalAudio> {
+    try {
+        const buffer = await audioLoader.loadAsync(url);
+        const audio = isPositional
+            ? new THREE.PositionalAudio(listener)
+            : new THREE.Audio(listener);
+
+        audio.setBuffer(buffer);
+        if (options.loop !== undefined) audio.setLoop(options.loop);
+        if (options.volume !== undefined) audio.setVolume(options.volume);
+        if (isPositional && options.refDistance !== undefined) {
+            (audio as THREE.PositionalAudio).setRefDistance(options.refDistance);
+        }
+        return audio;
+    } catch (err) {
+        console.error(`Error loading audio from ${url}:`, err);
+        throw err; // Re-throw to be caught by the caller
+    }
+}
+
 
 interface SpawnOptions {
     areaSize: number;
@@ -424,13 +451,12 @@ function findValidGroundPosition(opts: SpawnOptions): {
             }
         }
 
-        const origin = new THREE.Vector3(x, raycastStartY, z);
-        raycaster.set(origin, down);
-        const intersects = raycaster.intersectObjects(worldObjects, true);
-        if (intersects.length === 0) continue;
+        const origin = new THREE.Vector3(x, 0, z); // Use y=0 for intersection check
+        const intersect = getGroundIntersection(origin, raycastStartY);
+        if (!intersect) continue;
 
-        const groundY = intersects[0].point.y;
-        const hitObject = intersects[0].object as THREE.Mesh;
+        const groundY = intersect.point.y;
+        const hitObject = intersect.object as THREE.Mesh;
 
         // Water check
         const isWater = isWaterSurface(hitObject) || (considerWaterHeight && groundY < waterHeightThreshold);
@@ -438,7 +464,7 @@ function findValidGroundPosition(opts: SpawnOptions): {
 
         // Slope check (if required)
         if (requireSlopeCheck) {
-            const face = intersects[0].face;
+            const face = intersect.face;
             if (face) {
                 const worldNormal = face.normal.clone().applyMatrix3(
                     new THREE.Matrix3().getNormalMatrix(hitObject.matrixWorld)
@@ -452,7 +478,7 @@ function findValidGroundPosition(opts: SpawnOptions): {
 
         // Clearance check above ground (if required)
         if (requireClearance && clearanceHeight > 0) {
-            const clearanceOrigin = intersects[0].point.clone();
+            const clearanceOrigin = intersect.point.clone();
             clearanceOrigin.y += clearanceOriginOffset;
             const upRay = new THREE.Vector3(0, 1, 0);
             raycaster.set(clearanceOrigin, upRay);
@@ -513,6 +539,45 @@ function triggerPlayerFall(lockDuration: number = 1000): void {
 }
 
 /**
+ * Creates a minimap marker (a sphere with a ring).
+ * @param config Configuration object for the marker's appearance.
+ * @returns A THREE.Mesh object representing the marker.
+ */
+function createMinimapMarker(config: {
+    sphereColor: THREE.ColorRepresentation,
+    sphereRadius: number,
+    sphereSegments?: number,
+    ringColor: THREE.ColorRepresentation,
+    ringInnerRadius: number,
+    ringOuterRadius: number,
+    ringSegments?: number,
+    ringOpacity?: number
+}): THREE.Mesh {
+    const marker = new THREE.Mesh(
+        new THREE.SphereGeometry(config.sphereRadius, config.sphereSegments ?? 16, config.sphereSegments ?? 16),
+        new THREE.MeshBasicMaterial({
+            color: config.sphereColor,
+            transparent: true,
+            opacity: 0.9
+        })
+    );
+
+    const ring = new THREE.Mesh(
+        new THREE.RingGeometry(config.ringInnerRadius, config.ringOuterRadius, config.ringSegments ?? 16),
+        new THREE.MeshBasicMaterial({
+            color: config.ringColor,
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: config.ringOpacity ?? 0.7
+        })
+    );
+    ring.rotation.x = -Math.PI / 2;
+    marker.add(ring);
+    return marker;
+}
+
+
+/**
  * Updates minimap entity positions and renders the 3D minimap view.
  */
 function updateAndRenderMinimap(): void {
@@ -532,29 +597,14 @@ function updateAndRenderMinimap(): void {
     // Update spider markers - visible but not too large
     for (let i = 0; i < spiders.length; i++) {
         if (i >= minimapSpiderMarkers.length) {
-            // Create new spider marker - red sphere with ring
-            const marker = new THREE.Mesh(
-                new THREE.SphereGeometry(3, 16, 16),
-                new THREE.MeshBasicMaterial({
-                    color: 0x000000,
-                    transparent: true,
-                    opacity: 0.9
-                })
-            );
-
-            // Add glowing ring around spider
-            const ring = new THREE.Mesh(
-                new THREE.RingGeometry(4, 5, 16),
-                new THREE.MeshBasicMaterial({
-                    color: 0xff0000,
-                    side: THREE.DoubleSide,
-                    transparent: true,
-                    opacity: 0.7
-                })
-            );
-            ring.rotation.x = -Math.PI / 2;
-            marker.add(ring);
-
+            // Create new spider marker
+            const marker = createMinimapMarker({
+                sphereColor: 0x000000,
+                sphereRadius: 3,
+                ringColor: 0xff0000,
+                ringInnerRadius: 4,
+                ringOuterRadius: 5
+            });
             minimapSpiderMarkers.push(marker);
             minimapScene.add(marker);
         }
@@ -568,29 +618,14 @@ function updateAndRenderMinimap(): void {
     // Update bee markers
     for (let i = 0; i < bees.length; i++) {
         if (i >= minimapBeeMarkers.length) {
-            // Create new bee marker - yellow sphere with black ring
-            const marker = new THREE.Mesh(
-                new THREE.SphereGeometry(3, 16, 16),
-                new THREE.MeshBasicMaterial({
-                    color: 0xffff00, // Yellow
-                    transparent: true,
-                    opacity: 0.9
-                })
-            );
-
-            // Add black ring
-            const ring = new THREE.Mesh(
-                new THREE.RingGeometry(4, 5, 16),
-                new THREE.MeshBasicMaterial({
-                    color: 0x000000, // Black
-                    side: THREE.DoubleSide,
-                    transparent: true,
-                    opacity: 0.7
-                })
-            );
-            ring.rotation.x = -Math.PI / 2;
-            marker.add(ring);
-
+            // Create new bee marker
+            const marker = createMinimapMarker({
+                sphereColor: 0xffff00, // Yellow
+                sphereRadius: 3,
+                ringColor: 0x000000, // Black
+                ringInnerRadius: 4,
+                ringOuterRadius: 5
+            });
             minimapBeeMarkers.push(marker);
             minimapScene.add(marker);
         }
@@ -606,30 +641,19 @@ function updateAndRenderMinimap(): void {
     for (let i = 0; i < crystals.length; i++) {
         if (i >= minimapCrystalMarkers.length) {
             // Get the crystal's color
-            const crystalColor = 0x00aaff;
+            const crystalColor = 0x00aaff; // NOTE: This is hardcoded, as original logic didn't pass color here
 
             // Create new crystal marker with matching color
-            const marker = new THREE.Mesh(
-                new THREE.SphereGeometry(2, 8, 8),
-                new THREE.MeshBasicMaterial({
-                    color: crystalColor,
-                    transparent: true,
-                    opacity: 0.9
-                })
-            );
-
-            // Add small glow ring with matching color
-            const ring = new THREE.Mesh(
-                new THREE.RingGeometry(2, 3, 8),
-                new THREE.MeshBasicMaterial({
-                    color: 0xffffff,
-                    side: THREE.DoubleSide,
-                    transparent: true,
-                    opacity: 0.8
-                })
-            );
-            ring.rotation.x = -Math.PI / 2;
-            marker.add(ring);
+            const marker = createMinimapMarker({
+                sphereColor: crystalColor,
+                sphereRadius: 2,
+                sphereSegments: 8,
+                ringColor: 0xffffff,
+                ringInnerRadius: 2,
+                ringOuterRadius: 3,
+                ringSegments: 8,
+                ringOpacity: 0.8
+            });
 
             minimapCrystalMarkers.push(marker);
             minimapScene.add(marker);
@@ -844,13 +868,8 @@ async function spawnAnimals(count: number) {
                 model.position.set(res.position.x, res.groundY, res.position.z);
             }
 
-            model.traverse((child) => {
-                if ((child as THREE.Mesh).isMesh) {
-                    const mesh = child as THREE.Mesh;
-                    mesh.castShadow = true;
-                    mesh.receiveShadow = true;
-                }
-            });
+            // REFACTORED: Removed redundant model.traverse.
+            // loadModel() already enables shadows.
 
             let animalMixer: THREE.AnimationMixer | null = null;
             let animalAction: THREE.AnimationAction | null = null;
@@ -965,13 +984,8 @@ async function spawnSpiders(count: number) {
                 model.position.set(res.position.x, res.groundY, res.position.z);
             }
 
-            model.traverse((child) => {
-                if ((child as THREE.Mesh).isMesh) {
-                    const mesh = child as THREE.Mesh;
-                    mesh.castShadow = true;
-                    mesh.receiveShadow = true;
-                }
-            });
+            // REFACTORED: Removed redundant model.traverse.
+            // loadModel() already enables shadows.
 
             let spiderMixer: THREE.AnimationMixer | null = null;
             let spiderWalkAction: THREE.AnimationAction | null = null;
@@ -1085,13 +1099,8 @@ async function spawnBees(count: number) {
                 model.position.set(0, BEE_SPAWN_ALTITUDE, 0);
             }
 
-            model.traverse((child) => {
-                if ((child as THREE.Mesh).isMesh) {
-                    const mesh = child as THREE.Mesh;
-                    mesh.castShadow = true;
-                    mesh.receiveShadow = true;
-                }
-            });
+            // REFACTORED: Removed redundant model.traverse.
+            // loadModel() already enables shadows.
 
             // Load bee flying sound
             let beeFlySound: THREE.PositionalAudio | null = null;
@@ -1254,12 +1263,12 @@ function updateSpiderJumpBack(spider: SpiderInstance) {
     const currentPos = spider.jumpBackStartPos.clone().lerp(spider.jumpBackEndPos, easeProgress);
 
     // Check ground height at current position
-    const groundResult = getGroundHeight(currentPos);
+    const groundIntersect = getGroundIntersection(currentPos);
 
-    if (groundResult) {
+    if (groundIntersect) {
         spider.model.position.x = currentPos.x;
         spider.model.position.z = currentPos.z;
-        spider.model.position.y = groundResult.groundY;
+        spider.model.position.y = groundIntersect.point.y;
     }
 
     // Jump back complete
@@ -1638,164 +1647,57 @@ async function loadUICrystalTemplate() {
     }
 }
 
-function loadAudio() {
+async function loadAudio() {
     if (!playerModel) return;
 
-    runningSound = new THREE.PositionalAudio(listener);
-    audioLoader.load(
-        runningSoundUrl,
-        function (buffer) {
-            if (runningSound) {
-                runningSound.setBuffer(buffer);
-                runningSound.setLoop(true);
-                runningSound.setVolume(1.5);
-                runningSound.setRefDistance(10);
-            }
-        },
-        undefined,
-        (err) => {
-            console.error("Błąd ładowania dźwięku trawy:", err);
-        },
-    );
-    playerModel.add(runningSound);
+    try {
+        // Positional sounds attached to the player
+        runningSound = await createAudioFromUrl(runningSoundUrl, true, listener, {
+            loop: true, volume: 1.5, refDistance: 10
+        }) as THREE.PositionalAudio;
+        playerModel.add(runningSound);
 
-    waterSound = new THREE.PositionalAudio(listener);
-    audioLoader.load(
-        waterSoundUrl,
-        function (buffer) {
-            if (waterSound) {
-                waterSound.setBuffer(buffer);
-                waterSound.setLoop(true);
-                waterSound.setVolume(0.5);
-                waterSound.setRefDistance(10);
-            }
-        },
-        undefined,
-        (err) => {
-            console.error("Błąd ładowania dźwięku wody:", err);
-        },
-    );
-    playerModel.add(waterSound);
+        waterSound = await createAudioFromUrl(waterSoundUrl, true, listener, {
+            loop: true, volume: 0.5, refDistance: 10
+        }) as THREE.PositionalAudio;
+        playerModel.add(waterSound);
 
-    bumpSound = new THREE.PositionalAudio(listener);
-    audioLoader.load(
-        bumpSoundUrl,
-        function (buffer) {
-            if (bumpSound) {
-                bumpSound.setBuffer(buffer);
-                bumpSound.setLoop(false);
-                bumpSound.setVolume(0.25);
-                bumpSound.setRefDistance(10);
-            }
-        },
-        undefined,
-        (err) => {
-            console.error("Błąd ładowania dźwięku uderzenia:", err);
-        },
-    );
-    playerModel.add(bumpSound);
+        bumpSound = await createAudioFromUrl(bumpSoundUrl, true, listener, {
+            loop: false, volume: 0.25, refDistance: 10
+        }) as THREE.PositionalAudio;
+        playerModel.add(bumpSound);
 
-    // Load and play background music
-    backgroundMusic = new THREE.Audio(listener);
-    audioLoader.load(
-        forestAtmosphereUrl,
-        function (buffer) {
-            if (backgroundMusic) {
-                backgroundMusic.setBuffer(buffer);
-                backgroundMusic.setLoop(true);
-                backgroundMusic.setVolume(0.3);
-                backgroundMusic.play();
-            }
-        },
-        undefined,
-        (err) => {
-            console.error("Error loading background music:", err);
-        },
-    );
+        biteSound = await createAudioFromUrl(animalHitSoundUrl, true, listener, {
+            loop: false, volume: 1, refDistance: 10
+        }) as THREE.PositionalAudio;
+        playerModel.add(biteSound);
 
-    // Load bite sound
-    biteSound = new THREE.PositionalAudio(listener);
-    audioLoader.load(
-        animalHitSoundUrl,
-        function (buffer) {
-            if (biteSound) {
-                biteSound.setBuffer(buffer);
-                biteSound.setLoop(false);
-                biteSound.setVolume(1);
-                biteSound.setRefDistance(10);
-            }
-        },
-        undefined,
-        (err) => {
-            console.error("Error loading bite sound:", err);
-        },
-    );
-    playerModel.add(biteSound);
+        errorSound = await createAudioFromUrl(errorSoundUrl, true, listener, {
+            loop: false, volume: 1, refDistance: 10
+        }) as THREE.PositionalAudio;
+        playerModel.add(errorSound);
 
-    // Load error sound
-    errorSound = new THREE.PositionalAudio(listener);
-    audioLoader.load(
-        errorSoundUrl,
-        function (buffer) {
-            if (errorSound) {
-                errorSound.setBuffer(buffer);
-                errorSound.setLoop(false);
-                errorSound.setVolume(1);
-                errorSound.setRefDistance(10);
-            }
-        },
-        undefined,
-        (err) => {
-            console.error("Error loading error sound:", err);
-        },
-    );
-    playerModel.add(errorSound);
+        waterSplashSound = await createAudioFromUrl(waterSplashSoundUrl, true, listener, {
+            loop: false, volume: 0.75, refDistance: 15
+        }) as THREE.PositionalAudio;
+        playerModel.add(waterSplashSound);
 
-    // Load water splash sound
-    waterSplashSound = new THREE.PositionalAudio(listener);
-    audioLoader.load(
-        waterSplashSoundUrl,
-        function (buffer) {
-            if (waterSplashSound) {
-                waterSplashSound.setBuffer(buffer);
-                waterSplashSound.setLoop(false);
-                waterSplashSound.setVolume(0.75);
-                waterSplashSound.setRefDistance(15);
-            }
-        },
-        undefined,
-        (err) => {
-            console.error("Error loading water splash sound:", err);
-        },
-    );
-    playerModel.add(waterSplashSound);
+        // Non-positional (global) sounds
+        backgroundMusic = await createAudioFromUrl(forestAtmosphereUrl, false, listener, {
+            loop: true, volume: 0.3
+        });
+        backgroundMusic.play();
 
-    successSound = new THREE.Audio(listener);
-    audioLoader.load(
-        successSoundUrl,
-        function (buffer) {
-            if (successSound) {
-                successSound.setBuffer(buffer);
-                successSound.setLoop(false);
-                successSound.setVolume(0.8);
-            }
-        },
-        undefined,
-        (err) => {
-            console.error("Error loading success sound:", err);
-        },
-    );
+        successSound = await createAudioFromUrl(successSoundUrl, false, listener, {
+            loop: false, volume: 0.8
+        });
 
-    audioLoader.load(
-        fireworkSoundUrl,
-        function (buffer) {
-            fireworkBuffer = buffer;
-        },
-        undefined,
-        (err) => {
-            console.error("Error loading firework sound:", err);
-        },
-    );
+        // Firework buffer is loaded directly for manual playback
+        fireworkBuffer = await audioLoader.loadAsync(fireworkSoundUrl);
+
+    } catch (err) {
+        console.error("One or more audio files failed to load:", err);
+    }
 }
 
 async function createPlayer() {
@@ -1804,7 +1706,7 @@ async function createPlayer() {
         const {model, animations} = await loadModel("Animated Platformer Character.glb");
         playerModel = model;
 
-        loadAudio();
+        await loadAudio();
 
         playerModel.scale.setScalar(0.5);
         playerModel.position.set(5, 7, 8);
@@ -1897,32 +1799,53 @@ async function createPlayer() {
 }
 
 /**
+ * Factory function to create a single particle and add it to the scene and data array.
+ * @param position The particle's initial position.
+ * @param velocity The particle's initial velocity.
+ * @param material The material to use (must be a clone).
+ * @param maxAge The particle's lifespan in seconds.
+ * @param scale The particle's initial scale.
+ */
+function spawnParticle(
+    position: THREE.Vector3,
+    velocity: THREE.Vector3,
+    material: THREE.MeshBasicMaterial,
+    maxAge: number,
+    scale: number = 1.0
+) {
+    // Use the global particleGeometry
+    const mesh = new THREE.Mesh(particleGeometry, material);
+    mesh.position.copy(position);
+    mesh.scale.setScalar(scale);
+
+    scene.add(mesh);
+
+    particleData.push({
+        mesh,
+        velocity,
+        age: 0,
+        maxAge: maxAge,
+    });
+}
+
+/**
  * Creates and launches a burst of splash particles from the given position.
  */
 function spawnSplash(position: THREE.Vector3) {
     for (let i = 0; i < SPLASH_PARTICLE_COUNT; i++) {
-        const material = particleMaterial.clone();
-        const mesh = new THREE.Mesh(particleGeometry, material);
+        const material = particleMaterial.clone() as THREE.MeshBasicMaterial;
 
         const initialPosition = position.clone();
         initialPosition.y += 0.2;
         initialPosition.x += (Math.random() - 0.5) * 0.5;
         initialPosition.z += (Math.random() - 0.5) * 0.5;
-        mesh.position.copy(initialPosition);
 
         const velX = (Math.random() * 2 - 1) * 0.5;
         const velY = Math.random() * 1.5 + 1;
         const velZ = (Math.random() * 2 - 1) * 0.5;
         const velocity = new THREE.Vector3(velX, velY, velZ);
 
-        scene.add(mesh);
-
-        particleData.push({
-            mesh,
-            velocity,
-            age: 0,
-            maxAge: SPLASH_LIFESPAN,
-        });
+        spawnParticle(initialPosition, velocity, material, SPLASH_LIFESPAN);
     }
 }
 
@@ -1932,14 +1855,12 @@ function spawnSplash(position: THREE.Vector3) {
  */
 function spawnBigSplash(position: THREE.Vector3) {
     for (let i = 0; i < BIG_SPLASH_PARTICLE_COUNT; i++) {
-        const material = particleMaterial.clone();
-        const mesh = new THREE.Mesh(particleGeometry, material);
+        const material = particleMaterial.clone() as THREE.MeshBasicMaterial;
 
         const initialPosition = position.clone();
         initialPosition.y += 0.3;
         initialPosition.x += (Math.random() - 0.5) * BIG_SPLASH_SPREAD;
         initialPosition.z += (Math.random() - 0.5) * BIG_SPLASH_SPREAD;
-        mesh.position.copy(initialPosition);
 
         // Larger, more varied velocities for dramatic effect
         const angle = Math.random() * Math.PI * 2;
@@ -1951,16 +1872,8 @@ function spawnBigSplash(position: THREE.Vector3) {
 
         // Vary particle size for more realistic effect
         const scale = Math.random() * 0.5 + 0.8; // 0.8 to 1.3
-        mesh.scale.setScalar(scale);
 
-        scene.add(mesh);
-
-        particleData.push({
-            mesh,
-            velocity,
-            age: 0,
-            maxAge: SPLASH_LIFESPAN * 1.2, // Big splash particles last slightly longer
-        });
+        spawnParticle(initialPosition, velocity, material, SPLASH_LIFESPAN * 1.2, scale);
     }
 }
 
@@ -1971,12 +1884,9 @@ function spawnCrystalCollectEffect(position: THREE.Vector3, color: THREE.Color) 
         material.color.set(color);
         material.opacity = 1;
 
-        const mesh = new THREE.Mesh(particleGeometry, material);
-
         // Start at the crystal's position
         const initialPosition = position.clone();
         initialPosition.y += 0.5; // Start slightly above ground
-        mesh.position.copy(initialPosition);
 
         // Random outward and upward velocity
         const angle = Math.random() * Math.PI * 2;
@@ -1988,16 +1898,9 @@ function spawnCrystalCollectEffect(position: THREE.Vector3, color: THREE.Color) 
 
         // Use a slightly smaller particle size
         const scale = Math.random() * 0.3 + 0.5; // 0.5 to 0.8
-        mesh.scale.setScalar(scale);
+        const maxAge = CRYSTAL_LIFESPAN * (Math.random() * 0.3 + 0.8);
 
-        scene.add(mesh);
-
-        particleData.push({
-            mesh,
-            velocity,
-            age: 0,
-            maxAge: CRYSTAL_LIFESPAN * (Math.random() * 0.3 + 0.8), // Vary lifespan
-        });
+        spawnParticle(initialPosition, velocity, material, maxAge, scale);
     }
 }
 
@@ -2165,20 +2068,15 @@ function updateAnimalMovement(animalInstance: AnimalInstance) {
         const moveVector = forward.multiplyScalar(animalInstance.moveSpeed * 0.016 * 60); // Normalize to ~60fps
         const newPosition = animal.position.clone().add(moveVector);
 
-        // Check ground height at new position - need to do full raycast for normal data
-        const groundCheckOrigin = newPosition.clone();
-        groundCheckOrigin.y += 10;
-        const downVector = new THREE.Vector3(0, -1, 0);
+        // Check ground height at new position
+        const groundIntersect = getGroundIntersection(newPosition, 10);
 
-        raycaster.set(groundCheckOrigin, downVector);
-        const groundIntersects = raycaster.intersectObjects(worldObjects, true);
-
-        if (groundIntersects.length > 0) {
-            const groundY = groundIntersects[0].point.y;
-            const hitObject = groundIntersects[0].object as THREE.Mesh;
+        if (groundIntersect) {
+            const groundY = groundIntersect.point.y;
+            const hitObject = groundIntersect.object as THREE.Mesh;
 
             // Check if terrain is not too steep and not water
-            const face = groundIntersects[0].face;
+            const face = groundIntersect.face;
             let isSafe = true;
 
             // Check slope if we have face normal data
@@ -2259,10 +2157,11 @@ function updateSpiderAI(spider: SpiderInstance) {
             const newPosition = spiderPos.clone().add(moveVector);
 
             // Check ground height at new position
-            const groundResult = getGroundHeight(newPosition);
+            const groundIntersect = getGroundIntersection(newPosition);
 
-            if (groundResult) {
-                const {groundY, hitObject} = groundResult;
+            if (groundIntersect) {
+                const groundY = groundIntersect.point.y;
+                const hitObject = groundIntersect.object as THREE.Mesh;
 
                 // Spiders can walk on steep surfaces - only check for water
                 const isWater = isWaterSurface(hitObject);
@@ -2338,10 +2237,11 @@ function updateSpiderAI(spider: SpiderInstance) {
                 spider.model.rotation.y += Math.PI / 4;
             } else {
                 // Check ground height
-                const groundResult = getGroundHeight(newPosition);
+                const groundIntersect = getGroundIntersection(newPosition);
 
-                if (groundResult) {
-                    const {groundY, hitObject} = groundResult;
+                if (groundIntersect) {
+                    const groundY = groundIntersect.point.y;
+                    const hitObject = groundIntersect.object as THREE.Mesh;
 
                     // Spiders can walk on steep surfaces - only check for water
                     const isWater = isWaterSurface(hitObject);
@@ -2380,9 +2280,9 @@ function forceBeeWander(bee: BeeInstance) {
 
         // Find ground height at new (x, z)
         let groundY = 0;
-        const groundResult = getGroundHeight(new THREE.Vector3(x, 0, z));
-        if (groundResult) {
-            groundY = groundResult.groundY;
+        const groundIntersect = getGroundIntersection(new THREE.Vector3(x, 0, z));
+        if (groundIntersect) {
+            groundY = groundIntersect.point.y;
         }
 
         const y = groundY + BEE_BASE_WANDER_ALTITUDE + (Math.random() - 0.5) * 5.0; // Vary altitude
@@ -2441,9 +2341,9 @@ function updateBeeAI(bee: BeeInstance) {
                 const newPosition = beePos.clone().add(moveVector);
 
                 // Check ground height to avoid flying into ground
-                const groundResult = getGroundHeight(newPosition, 20);
-                if (groundResult) {
-                    const {groundY} = groundResult;
+                const groundIntersect = getGroundIntersection(newPosition, 20);
+                if (groundIntersect) {
+                    const groundY = groundIntersect.point.y;
                     if (newPosition.y < groundY + BEE_MIN_ALTITUDE) {
                         newPosition.y = groundY + BEE_MIN_ALTITUDE;
                     }
@@ -2514,9 +2414,9 @@ function updateBeeAI(bee: BeeInstance) {
             const newPosition = beePos.clone().add(moveVector);
 
             // Simple obstacle avoidance: check ground height below *future* position
-            const groundResult = getGroundHeight(newPosition, 20); // Raycast from higher up
-            if (groundResult) {
-                const {groundY} = groundResult;
+            const groundIntersect = getGroundIntersection(newPosition, 20); // Raycast from higher up
+            if (groundIntersect) {
+                const groundY = groundIntersect.point.y;
                 // Ensure bee stays a minimum height above the ground
                 if (newPosition.y < groundY + BEE_MIN_ALTITUDE) {
                     newPosition.y = groundY + BEE_MIN_ALTITUDE;
@@ -2568,29 +2468,16 @@ function handlePlayerMovement() {
     }
 
     if (moving) {
-        const currentOrigin = originalPosition.clone();
-        currentOrigin.y += playerHeight;
-        raycaster.set(currentOrigin, down);
-        const currentIntersects = raycaster.intersectObjects(
-            worldObjects,
-            true,
-        );
-
+        const currentIntersect = getGroundIntersection(originalPosition, playerHeight);
         let currentGroundHeight = originalPosition.y - 1;
-        if (currentIntersects.length > 0) {
-            currentGroundHeight =
-                currentOrigin.y - currentIntersects[0].distance;
+        if (currentIntersect) {
+            currentGroundHeight = currentIntersect.point.y;
         }
 
-        const nextOrigin = targetPosition.clone();
-        nextOrigin.y = originalPosition.y + playerHeight;
-
-        raycaster.set(nextOrigin, down);
-        const nextIntersects = raycaster.intersectObjects(worldObjects, true);
-
+        const nextIntersect = getGroundIntersection(targetPosition, originalPosition.y - targetPosition.y + playerHeight);
         let nextGroundHeight = currentGroundHeight;
-        if (nextIntersects.length > 0) {
-            nextGroundHeight = nextOrigin.y - nextIntersects[0].distance;
+        if (nextIntersect) {
+            nextGroundHeight = nextIntersect.point.y;
         }
 
         const heightDifference = nextGroundHeight - currentGroundHeight;
@@ -2735,22 +2622,17 @@ function handlePlayerMovement() {
     playerModel.position.z = targetPosition.z;
 
 
-    const finalOrigin = playerModel.position.clone();
-    finalOrigin.y += playerHeight;
-
-    raycaster.set(finalOrigin, down);
-
-    const intersects = raycaster.intersectObjects(worldObjects, true);
+    const finalIntersect = getGroundIntersection(playerModel.position, playerHeight);
 
     let isWater = false;
     let groundHeight = 0;
     let playerHeightOffset = 0;
 
-    if (intersects.length > 0) {
-        const distanceToGround = intersects[0].distance;
-        groundHeight = finalOrigin.y - distanceToGround;
+    if (finalIntersect) {
+        const distanceToGround = finalIntersect.distance;
+        groundHeight = (playerModel.position.y + playerHeight) - distanceToGround;
 
-        const hitObject = intersects[0].object as THREE.Mesh;
+        const hitObject = finalIntersect.object as THREE.Mesh;
         isWater = isWaterSurface(hitObject);
 
         playerHeightOffset = isWater ? WATER_SINK_DEPTH : 0;
