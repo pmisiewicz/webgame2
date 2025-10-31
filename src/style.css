@@ -41,35 +41,60 @@ body, html {
     pointer-events: none;
 }
 
-#loading-text {
-    color: #ffffff;
+#loading-panel {
+    background-color: rgba(0, 0, 0, 0.75);
+    padding: 30px;
+    border-radius: 10px;
+    text-align: center;
+    color: white;
     font-family: Arial, sans-serif;
-    font-size: 24px;
-    margin-bottom: 20px;
+    min-width: 320px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+    max-width: 90%;
+    width: 420px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+#loading-text {
+    font-size: 18px;
+    margin-bottom: 10px;
 }
 
 #loading-bar-bg {
-    width: 400px;
-    height: 30px;
-    background: rgba(255, 255, 255, 0.2);
-    border-radius: 15px;
+    width: 100%;
+    height: 12px;
+    background: #333;
+    border-radius: 6px;
     overflow: hidden;
-    border: 2px solid rgba(255, 255, 255, 0.3);
+    margin-bottom: 8px;
+    border: 1px solid rgba(255,255,255,0.06);
 }
 
 #loading-bar-fill {
+    background: linear-gradient(90deg, #4CAF50, #8BC34A);
     width: 0;
     height: 100%;
-    background: linear-gradient(90deg, #4CAF50, #8BC34A);
-    border-radius: 15px;
-    transition: width 0.3s ease-out;
+    transition: width 200ms ease;
 }
 
 #loading-percentage {
+    font-size: 14px;
+    margin-bottom: 12px;
     color: #ffffff;
-    font-family: monospace;
+}
+
+#controls-info {
     font-size: 18px;
-    margin-top: 10px;
+    line-height: 1.5;
+    color: #e6f7ff;
+    margin-bottom: 32px;
+}
+
+#controls-info .controls-title {
+    font-weight: 700;
+    margin-bottom: 6px;
 }
 
 #crystal-count-text {
@@ -80,5 +105,5 @@ body, html {
 
 #crystal-count-text.collected {
     transform: scale(1.3);
-    color: #88ff88; /* Lighter green */
+    color: #88ff88;
 }

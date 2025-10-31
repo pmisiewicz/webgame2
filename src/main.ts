@@ -513,15 +513,32 @@ function setupFpsCounter() {
 function setupLoadingBar() {
     const container = document.createElement('div');
     container.id = 'loading-container';
-    container.innerHTML = `
+    document.body.appendChild(container);
+
+    const panel = document.createElement('div');
+    panel.id = 'loading-panel';
+    panel.innerHTML = `
+        <div id="controls-info">
+            <div class="controls-title">Sterowanie</div>
+            <div><strong>⬆️ lub W</strong> - przód</div>
+            <div><strong>⬇️ lub S</strong> - tył</div>
+            <div><strong>⬅️ lub A</strong> - lewo</div>
+            <div><strong>➡️ lub D</strong> - prawo</div>
+            <div><strong>Spacja - skok</strong></div>
+            <div><strong>Shift</strong> - sprint</div>
+        </div>
+        
         <div id="loading-text">Loading Game Assets...</div>
+
         <div id="loading-bar-bg">
             <div id="loading-bar-fill"></div>
         </div>
+
         <div id="loading-percentage">0%</div>
     `;
-    document.body.appendChild(container);
+    container.appendChild(panel);
 }
+
 
 function setupCrystalUI() {
     const container = document.createElement('div');
