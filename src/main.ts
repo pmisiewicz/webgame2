@@ -23,7 +23,7 @@ const FOG_NEAR = 50;
 const FOG_FAR = 150;
 
 // Game
-const TOTAL_EQUATIONS_TO_SOLVE = 1;
+const TOTAL_EQUATIONS_TO_SOLVE = 10;
 const TOTAL_CRYSTALS = TOTAL_EQUATIONS_TO_SOLVE;
 
 // Player
@@ -2378,6 +2378,7 @@ const animalCount = 10;
 const spiderCount = 3;
 const beeCount = 3;
 
+// Initialize loading with total steps: sun (1) + clouds (1) + player (2 steps) + world (2 steps) + animals + spiders + bees + crystals + UI
 initializeLoading(1 + 1 + 2 + 2 + animalCount + spiderCount + beeCount + TOTAL_CRYSTALS + 1);
 
 createSun()
