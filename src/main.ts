@@ -36,6 +36,7 @@ const COLLISION_RADIUS = 0.8;
 const JUMP_FORCE = 10;
 const JUMP_GRAVITY = -30;
 const MAX_JUMPS = 2;
+const PLAYER_START_POS = new THREE.Vector3(-5, 7, -5);
 
 // Spiders
 const SPIDER_DETECTION_RANGE = 10;
@@ -94,6 +95,8 @@ const camera = new THREE.PerspectiveCamera(
     0.5,
     FOG_FAR,
 );
+camera.position.set(PLAYER_START_POS.x, 200, PLAYER_START_POS.z);
+camera.lookAt(PLAYER_START_POS.x, 10, PLAYER_START_POS.z);
 const listener = new THREE.AudioListener();
 camera.add(listener);
 
@@ -387,7 +390,6 @@ interface SpawnOptions {
     areaSize: number;
     spawnAttempts?: number;
     minDistanceFromPlayer?: number;
-    playerStartPos?: THREE.Vector3;
     raycastStartY?: number;
     allowWater?: boolean;
     considerWaterHeight?: boolean;
@@ -409,7 +411,6 @@ function findValidGroundPosition(opts: SpawnOptions): {
         areaSize,
         spawnAttempts = 100,
         minDistanceFromPlayer,
-        playerStartPos,
         raycastStartY = 50,
         allowWater = false,
         considerWaterHeight = true,
@@ -426,9 +427,9 @@ function findValidGroundPosition(opts: SpawnOptions): {
         const x = (Math.random() - 0.5) * areaSize;
         const z = (Math.random() - 0.5) * areaSize;
 
-        if (minDistanceFromPlayer && playerStartPos) {
+        if (minDistanceFromPlayer) {
             const spawnPos2D = new THREE.Vector3(x, 0, z);
-            if (spawnPos2D.distanceTo(playerStartPos) < minDistanceFromPlayer) {
+            if (spawnPos2D.distanceTo(PLAYER_START_POS) < minDistanceFromPlayer) {
                 continue;
             }
         }
@@ -923,7 +924,7 @@ async function createPlayer() {
         await loadAudio();
 
         playerModel.scale.setScalar(0.5);
-        playerModel.position.set(5, 7, 8);
+        playerModel.position.set(PLAYER_START_POS.x, PLAYER_START_POS.y, PLAYER_START_POS.z);
 
         const bbox = new THREE.Box3().setFromObject(playerModel);
         playerHeight = bbox.max.y - bbox.min.y;
@@ -965,7 +966,6 @@ async function createPlayer() {
             }
         }
         incrementLoadingProgress('Postać załadowana');
-        updateCameraPosition(true);
     } catch (err) {
         console.warn("Błąd ładowania modelu 'Animated Platformer Character.glb':", err);
         incrementLoadingProgress('Błąd ładowania postaci');
@@ -1047,7 +1047,6 @@ async function spawnSpiders(count: number) {
     const areaSize = 200;
     const spawnAttempts = 15;
     const MIN_DISTANCE_FROM_PLAYER = 50;
-    const playerStartPos = new THREE.Vector3(5, 0, 8);
 
     for (let i = 0; i < count; i++) {
         try {
@@ -1059,7 +1058,7 @@ async function spawnSpiders(count: number) {
 
             const res = findValidGroundPosition({
                 areaSize, spawnAttempts, minDistanceFromPlayer: MIN_DISTANCE_FROM_PLAYER,
-                playerStartPos, raycastStartY: 50, allowWater: false,
+                raycastStartY: 50, allowWater: false,
                 clearanceHeight: 3.0, clearanceOriginOffset: 0.1, maxGroundY: 15,
                 requireSlopeCheck: false, requireClearance: true
             });
@@ -1114,7 +1113,6 @@ async function spawnBees(count: number) {
     const areaSize = 200;
     const spawnAttempts = 15;
     const MIN_DISTANCE_FROM_PLAYER = 40;
-    const playerStartPos = new THREE.Vector3(5, 0, 8);
 
     for (let i = 0; i < count; i++) {
         try {
@@ -1126,7 +1124,7 @@ async function spawnBees(count: number) {
 
             const resBee = findValidGroundPosition({
                 areaSize, spawnAttempts, minDistanceFromPlayer: MIN_DISTANCE_FROM_PLAYER,
-                playerStartPos, raycastStartY: 50, allowWater: true,
+                raycastStartY: 50, allowWater: true,
                 clearanceHeight: 3.0, clearanceOriginOffset: 0.1, maxGroundY: 15,
                 requireSlopeCheck: false, requireClearance: true
             });
@@ -1201,7 +1199,6 @@ async function spawnCrystals(numbersToSpawn: number[]) {
     const areaSize = 220;
     const spawnAttempts = 1000;
     const MIN_DISTANCE_FROM_PLAYER = 20;
-    const playerStartPos = new THREE.Vector3(5, 7, 8);
 
     const colorPalette = [0x0099ff, 0x00ff66, 0xff3333, 0xff66ff, 0xffff00];
 
@@ -1215,7 +1212,7 @@ async function spawnCrystals(numbersToSpawn: number[]) {
 
             const res = findValidGroundPosition({
                 areaSize, spawnAttempts, minDistanceFromPlayer: MIN_DISTANCE_FROM_PLAYER,
-                playerStartPos, raycastStartY: 50, allowWater: false,
+                raycastStartY: 50, allowWater: false,
                 considerWaterHeight: true, waterHeightThreshold: 0.5,
                 clearanceHeight: 4.0, clearanceOriginOffset: 0.1, maxGroundY: 8,
                 minSlopeDot: 0.85, requireSlopeCheck: true, requireClearance: true
@@ -2068,16 +2065,22 @@ function handlePlayerMovement() {
     }
 }
 
-function updateCameraPosition(instant: boolean = false) {
+function updateCameraPosition() {
     if (!playerModel) return;
 
+    const targetPosition = new THREE.Vector3(PLAYER_START_POS.x, 7, PLAYER_START_POS.z);
+    if (playerModel.position.y <= 0) {
+        camera.position.lerp(targetPosition, 0.01);
+        camera.up.set(0, 1, 0);
+        camera.lookAt(new THREE.Vector3(PLAYER_START_POS.x, 7, PLAYER_START_POS.z + 1));
+        return;
+    }
+
     const offset = new THREE.Vector3(0, 3, -7);
-    const targetPosition = new THREE.Vector3();
     offset.applyQuaternion(playerModel.quaternion);
     targetPosition.copy(playerModel.position).add(offset);
 
-    if (instant) camera.position.copy(targetPosition);
-    else camera.position.lerp(targetPosition, 0.05);
+    camera.position.lerp(targetPosition, 0.05);
 
     const lookAtPoint = playerModel.position.clone().add(new THREE.Vector3(0, 3, 0));
     camera.lookAt(lookAtPoint);
@@ -2408,10 +2411,10 @@ const beeCount = 3;
 // Initialize loading with total steps: sun (1) + clouds (1) + player (2 steps) + world (2 steps) + animals + spiders + bees + crystals + UI
 initializeLoading(1 + 1 + 2 + 2 + animalCount + spiderCount + beeCount + TOTAL_CRYSTALS + 1);
 
-createSun()
-    .then(() => createClouds())
+createWorld()
     .then(() => createPlayer())
-    .then(() => createWorld())
+    .then(() => createClouds())
+    .then(() => createSun())
     .then(() => spawnAnimals(animalCount))
     .then(() => spawnSpiders(spiderCount))
     .then(() => spawnBees(beeCount))
