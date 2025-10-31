@@ -708,7 +708,7 @@ function spawnBigSplash(position: THREE.Vector3) {
     }
 }
 
-function spawnCrystalCollectEffect(position: THREE.Vector3, color: THREE.Color) {
+function spawnCrystalCollectEffect(position: THREE.Vector3, color: THREE.Color, success: boolean) {
     for (let i = 0; i < CRYSTAL_PARTICLE_COUNT; i++) {
         const material = particleMaterial.clone() as THREE.MeshBasicMaterial;
         material.color.set(color);
@@ -720,12 +720,12 @@ function spawnCrystalCollectEffect(position: THREE.Vector3, color: THREE.Color) 
         const angle = Math.random() * Math.PI * 2;
         const horizontalSpeed = Math.random() * 0.5 + 0.5;
         const velX = Math.cos(angle) * horizontalSpeed * CRYSTAL_PARTICLE_SPEED;
-        const velY = (Math.random() * 0.5 + 0.5) * CRYSTAL_PARTICLE_SPEED;
+        const velY = (Math.random() * 0.5 + (success ? 0.5 : 0)) * CRYSTAL_PARTICLE_SPEED;
         const velZ = Math.sin(angle) * horizontalSpeed * CRYSTAL_PARTICLE_SPEED;
         const velocity = new THREE.Vector3(velX, velY, velZ);
 
-        const scale = Math.random() * 0.3 + 0.5;
-        const maxAge = CRYSTAL_LIFESPAN * (Math.random() * 0.3 + 0.8);
+        const scale = Math.random() * 0.3 + (success ? 0.5 : 0.1);
+        const maxAge = CRYSTAL_LIFESPAN * (Math.random() * 0.3 + (success ? 0.8 : 2));
 
         spawnParticle(initialPosition, velocity, material, maxAge, scale);
     }
@@ -1410,7 +1410,7 @@ function checkCrystalCollection() {
                     successSound.stop();
                     successSound.play();
                 }
-                spawnCrystalCollectEffect(crystalPos, crystalColor);
+                spawnCrystalCollectEffect(crystalPos, crystalColor, true);
 
                 collectedCrystals++;
                 const crystalIndex = collectedCrystals - 1;
@@ -1446,25 +1446,92 @@ function checkCrystalCollection() {
                     uiCrystalModels.push(newUICrystal);
                 }
 
+                scene.remove(crystal);
+                crystal.traverse((child) => {
+                    if ((child as THREE.Mesh).isMesh) {
+                        (child as THREE.Mesh).geometry?.dispose();
+                        const material = (child as THREE.Mesh).material;
+                        if (material) {
+                            Array.isArray(material)
+                                ? material.forEach(mat => mat.dispose())
+                                : material.dispose();
+                        }
+                    } else if (child instanceof THREE.Sprite) {
+                        (child.material as THREE.SpriteMaterial).map?.dispose();
+                        child.material.dispose();
+                    }
+                });
+                crystals.splice(i, 1);
+
+                if (i >= 0 && i < minimapCrystalMarkers.length) {
+                    const marker = minimapCrystalMarkers[i];
+                    minimapScene.remove(marker);
+                    marker.traverse((m) => {
+                        if ((m as THREE.Mesh).isMesh) {
+                            (m as THREE.Mesh).geometry?.dispose();
+                            const mat = (m as THREE.Mesh).material;
+                            if (mat) {
+                                Array.isArray(mat) ? mat.forEach(mm => mm.dispose()) : mat.dispose();
+                            }
+                        }
+                    });
+                    minimapCrystalMarkers.splice(i, 1);
+                }
+
                 if (collectedCrystals === TOTAL_EQUATIONS_TO_SOLVE) {
                     clearAllCrystals();
                     showWinScreen();
                 } else {
-                    // This is async, but we don't need to await it here
                     generateNewEquationAndRespawnCrystals();
                 }
-                return; // Stop iterating, arrays are modified
+                return;
 
             } else {
                 if (errorSound) {
                     errorSound.stop();
                     errorSound.play();
                 }
+                spawnCrystalCollectEffect(crystalPos, new THREE.Color(0.02, 0.02, 0.02), false);
+
+                scene.remove(crystal);
+                crystal.traverse((child) => {
+                    if ((child as THREE.Mesh).isMesh) {
+                        (child as THREE.Mesh).geometry?.dispose();
+                        const material = (child as THREE.Mesh).material;
+                        if (material) {
+                            Array.isArray(material)
+                                ? material.forEach(mat => mat.dispose())
+                                : material.dispose();
+                        }
+                    } else if (child instanceof THREE.Sprite) {
+                        (child.material as THREE.SpriteMaterial).map?.dispose();
+                        child.material.dispose();
+                    }
+                });
+
+                crystals.splice(i, 1);
+
+                if (i >= 0 && i < minimapCrystalMarkers.length) {
+                    const marker = minimapCrystalMarkers[i];
+                    minimapScene.remove(marker);
+                    marker.traverse((m) => {
+                        if ((m as THREE.Mesh).isMesh) {
+                            (m as THREE.Mesh).geometry?.dispose();
+                            const mat = (m as THREE.Mesh).material;
+                            if (mat) {
+                                Array.isArray(mat) ? mat.forEach(mm => mm.dispose()) : mat.dispose();
+                            }
+                        }
+                    });
+                    minimapCrystalMarkers.splice(i, 1);
+                }
+
+                return;
             }
-            break;
         }
     }
 }
+
 
 // --- AI & ANIMATION ---
 
