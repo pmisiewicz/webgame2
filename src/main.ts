@@ -889,7 +889,7 @@ async function loadAudio() {
         playerModel.add(biteSound);
 
         errorSound = await createAudioFromUrl(errorSoundUrl, true, listener, {
-            loop: false, volume: 0.5, refDistance: 10
+            loop: false, volume: 0.25, refDistance: 10
         }) as THREE.PositionalAudio;
         playerModel.add(errorSound);
 
