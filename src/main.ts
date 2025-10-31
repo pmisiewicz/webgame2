@@ -368,6 +368,110 @@ function getGroundHeight(position: THREE.Vector3, raycastHeight: number = 10): {
     return null;
 }
 
+interface SpawnOptions {
+    areaSize: number;
+    spawnAttempts?: number;
+    minDistanceFromPlayer?: number;
+    playerStartPos?: THREE.Vector3;
+    raycastStartY?: number;
+    allowWater?: boolean;
+    considerWaterHeight?: boolean;
+    waterHeightThreshold?: number;
+    clearanceHeight?: number;
+    clearanceOriginOffset?: number;
+    maxGroundY?: number;
+    minSlopeDot?: number;
+    requireSlopeCheck?: boolean;
+    requireClearance?: boolean;
+}
+
+
+/**
+ * Attempts to find a valid ground position according to the provided SpawnOptions.
+ * Returns an object with final position (with groundY applied), groundY and hitObject,
+ * or null if no valid position was found.
+ */
+function findValidGroundPosition(opts: SpawnOptions): {
+    position: THREE.Vector3;
+    groundY: number;
+    hitObject: THREE.Mesh
+} | null {
+    const {
+        areaSize,
+        spawnAttempts = 100,
+        minDistanceFromPlayer,
+        playerStartPos,
+        raycastStartY = 50,
+        allowWater = false,
+        considerWaterHeight = true,
+        waterHeightThreshold = 0.5,
+        clearanceHeight = 3.0,
+        clearanceOriginOffset = 0.1,
+        maxGroundY = Infinity,
+        minSlopeDot = 0.85,
+        requireSlopeCheck = true,
+        requireClearance = true,
+    } = opts;
+
+    for (let attempts = 0; attempts < spawnAttempts; attempts++) {
+        const x = (Math.random() - 0.5) * areaSize;
+        const z = (Math.random() - 0.5) * areaSize;
+
+        if (minDistanceFromPlayer && playerStartPos) {
+            const spawnPos2D = new THREE.Vector3(x, 0, z);
+            if (spawnPos2D.distanceTo(playerStartPos) < minDistanceFromPlayer) {
+                continue;
+            }
+        }
+
+        const origin = new THREE.Vector3(x, raycastStartY, z);
+        raycaster.set(origin, down);
+        const intersects = raycaster.intersectObjects(worldObjects, true);
+        if (intersects.length === 0) continue;
+
+        const groundY = intersects[0].point.y;
+        const hitObject = intersects[0].object as THREE.Mesh;
+
+        // Water check
+        const isWater = isWaterSurface(hitObject) || (considerWaterHeight && groundY < waterHeightThreshold);
+        if (!allowWater && isWater) continue;
+
+        // Slope check (if required)
+        if (requireSlopeCheck) {
+            const face = intersects[0].face;
+            if (face) {
+                const worldNormal = face.normal.clone().applyMatrix3(
+                    new THREE.Matrix3().getNormalMatrix(hitObject.matrixWorld)
+                ).normalize();
+                const slopeDot = worldNormal.dot(new THREE.Vector3(0, 1, 0));
+                if (slopeDot < minSlopeDot) {
+                    continue;
+                }
+            }
+        }
+
+        // Clearance check above ground (if required)
+        if (requireClearance && clearanceHeight > 0) {
+            const clearanceOrigin = intersects[0].point.clone();
+            clearanceOrigin.y += clearanceOriginOffset;
+            const upRay = new THREE.Vector3(0, 1, 0);
+            raycaster.set(clearanceOrigin, upRay);
+            raycaster.far = clearanceHeight;
+            const clearanceIntersects = raycaster.intersectObjects(worldObjects, true);
+            raycaster.far = Infinity;
+            const hasClearance = clearanceIntersects.length === 0;
+            if (!hasClearance) continue;
+        }
+
+        if (groundY >= maxGroundY) continue;
+
+        // Found valid position
+        return {position: new THREE.Vector3(x, groundY, z), groundY, hitObject};
+    }
+
+    return null;
+}
+
 /**
  * Stops all player movement animations and sounds.
  */
@@ -706,7 +810,7 @@ async function createWorld() {
 
 async function spawnAnimals(count: number) {
     const areaSize = 250;
-    const spawnAttempts = 15; // Increase attempts to find better spots
+    const spawnAttempts = 15;
 
     for (let i = 0; i < count; i++) {
         // Pick a random animal model
@@ -724,71 +828,20 @@ async function spawnAnimals(count: number) {
             // Random rotation
             model.rotation.y = Math.random() * Math.PI * 2;
 
-            // Try to find a valid position on the ground
-            let validPosition = false;
-            let attempts = 0;
+            const res = findValidGroundPosition({
+                areaSize,
+                spawnAttempts,
+                raycastStartY: 50,
+                allowWater: false,
+                clearanceHeight: 3.0,
+                clearanceOriginOffset: 0.1,
+                maxGroundY: 15,
+                requireSlopeCheck: true,
+                requireClearance: true
+            });
 
-            while (!validPosition && attempts < spawnAttempts) {
-                attempts++;
-
-                // Random position
-                const x = (Math.random() - 0.5) * areaSize;
-                const z = (Math.random() - 0.5) * areaSize;
-                const y = 50; // Start high and raycast down
-
-                // Raycast down to find ground
-                const origin = new THREE.Vector3(x, y, z);
-                raycaster.set(origin, down);
-                const intersects = raycaster.intersectObjects(worldObjects, true);
-
-                if (intersects.length > 0) {
-                    const groundY = intersects[0].point.y;
-                    const hitPoint = intersects[0].point;
-                    const hitObject = intersects[0].object as THREE.Mesh;
-
-                    // Get the surface normal at the hit point
-                    const face = intersects[0].face;
-                    let surfaceNormal = new THREE.Vector3(0, 1, 0); // Default upward normal
-
-                    if (face) {
-                        surfaceNormal = face.normal.clone();
-                        // Transform normal to world space
-                        surfaceNormal.transformDirection(hitObject.matrixWorld);
-                    }
-
-                    // Check if the surface is too steep (slope check)
-                    // A perfectly flat surface has normal (0, 1, 0), dot product = 1
-                    // A 45-degree slope has dot product ~0.707
-                    const upVector = new THREE.Vector3(0, 1, 0);
-                    const slopeDot = surfaceNormal.dot(upVector);
-                    const minSlopeDot = 0.85; // Roughly 30 degrees max slope
-
-                    // Check if it's not water
-                    const isWater = isWaterSurface(hitObject);
-
-                    // Additional check: make sure there's clearance above (not under a tree canopy)
-                    const clearanceHeight = 3.0;
-                    const clearanceOrigin = hitPoint.clone();
-                    clearanceOrigin.y += 0.1; // Start just above ground
-                    const upRay = new THREE.Vector3(0, 1, 0);
-                    raycaster.set(clearanceOrigin, upRay);
-                    raycaster.far = clearanceHeight;
-                    const clearanceIntersects = raycaster.intersectObjects(worldObjects, true);
-                    raycaster.far = Infinity;
-
-                    const hasClearance = clearanceIntersects.length === 0;
-
-                    // Accept position if: not water, not too steep, has clearance, and not too high
-                    const maxHeight = 15; // Don't spawn too high up (on tall rocks/trees)
-                    if (!isWater && slopeDot >= minSlopeDot && hasClearance && groundY < maxHeight) {
-                        model.position.set(x, groundY, z);
-                        validPosition = true;
-                    }
-                }
-            }
-
-            if (!validPosition) {
-                model.position.set(0, 0, 0);
+            if (res) {
+                model.position.set(res.position.x, res.groundY, res.position.z);
             }
 
             model.traverse((child) => {
@@ -894,58 +947,22 @@ async function spawnSpiders(count: number) {
             // Random rotation
             model.rotation.y = Math.random() * Math.PI * 2;
 
-            // Try to find a valid position on the ground
-            let validPosition = false;
-            let attempts = 0;
+            const res = findValidGroundPosition({
+                areaSize,
+                spawnAttempts,
+                minDistanceFromPlayer: MIN_DISTANCE_FROM_PLAYER,
+                playerStartPos,
+                raycastStartY: 50,
+                allowWater: false,
+                clearanceHeight: 3.0,
+                clearanceOriginOffset: 0.1,
+                maxGroundY: 15,
+                requireSlopeCheck: false,
+                requireClearance: true
+            });
 
-            while (!validPosition && attempts < spawnAttempts) {
-                attempts++;
-
-                const x = (Math.random() - 0.5) * areaSize;
-                const z = (Math.random() - 0.5) * areaSize;
-                const y = 50;
-
-                // Check distance from player starting position
-                const spawnPos = new THREE.Vector3(x, 0, z);
-                const distanceFromPlayer = spawnPos.distanceTo(playerStartPos);
-
-                if (distanceFromPlayer < MIN_DISTANCE_FROM_PLAYER) {
-                    continue; // Too close to player, try again
-                }
-
-                const origin = new THREE.Vector3(x, y, z);
-                raycaster.set(origin, down);
-                const intersects = raycaster.intersectObjects(worldObjects, true);
-
-                if (intersects.length > 0) {
-                    const groundY = intersects[0].point.y;
-                    const hitPoint = intersects[0].point;
-                    const hitObject = intersects[0].object as THREE.Mesh;
-
-                    const isWater = isWaterSurface(hitObject);
-
-                    const clearanceHeight = 3.0;
-                    const clearanceOrigin = hitPoint.clone();
-                    clearanceOrigin.y += 0.1;
-                    const upRay = new THREE.Vector3(0, 1, 0);
-                    raycaster.set(clearanceOrigin, upRay);
-                    raycaster.far = clearanceHeight;
-                    const clearanceIntersects = raycaster.intersectObjects(worldObjects, true);
-                    raycaster.far = Infinity;
-
-                    const hasClearance = clearanceIntersects.length === 0;
-                    const maxHeight = 15;
-
-                    // Spiders can spawn on steep surfaces - only check water, clearance, max height, and distance from player
-                    if (!isWater && hasClearance && groundY < maxHeight) {
-                        model.position.set(x, groundY, z);
-                        validPosition = true;
-                    }
-                }
-            }
-
-            if (!validPosition) {
-                model.position.set(0, 0, 0);
+            if (res) {
+                model.position.set(res.position.x, res.groundY, res.position.z);
             }
 
             model.traverse((child) => {
@@ -1049,57 +1066,23 @@ async function spawnBees(count: number) {
             // Random rotation
             model.rotation.y = Math.random() * Math.PI * 2;
 
-            // Try to find a valid position
-            let validPosition = false;
-            let attempts = 0;
-
-            while (!validPosition && attempts < spawnAttempts) {
-                attempts++;
-
-                const x = (Math.random() - 0.5) * areaSize;
-                const z = (Math.random() - 0.5) * areaSize;
-                const y = 50; // Raycast from high up
-
-                // Check distance from player starting position
-                const spawnPos = new THREE.Vector3(x, 0, z);
-                const distanceFromPlayer = spawnPos.distanceTo(playerStartPos);
-
-                if (distanceFromPlayer < MIN_DISTANCE_FROM_PLAYER) {
-                    continue; // Too close to player, try again
-                }
-
-                // Raycast down to find ground
-                const origin = new THREE.Vector3(x, y, z);
-                raycaster.set(origin, down);
-                const intersects = raycaster.intersectObjects(worldObjects, true);
-
-                if (intersects.length > 0) {
-                    const groundY = intersects[0].point.y;
-                    const hitPoint = intersects[0].point;
-
-                    // Check for clearance *above* the ground, but *at* spawn height
-                    const clearanceHeight = 3.0; // Check 3m bubble around bee
-                    const clearanceOrigin = hitPoint.clone();
-                    clearanceOrigin.y = groundY + BEE_SPAWN_ALTITUDE; // Check at actual spawn height
-                    const upRay = new THREE.Vector3(0, 1, 0);
-                    raycaster.set(clearanceOrigin, upRay);
-                    raycaster.far = clearanceHeight;
-                    const clearanceIntersects = raycaster.intersectObjects(worldObjects, true);
-                    raycaster.far = Infinity;
-
-                    const hasClearance = clearanceIntersects.length === 0;
-                    const maxHeight = 15; // Ground height max
-
-                    // Bees can spawn over water, but check clearance and ground height
-                    if (hasClearance && groundY < maxHeight) {
-                        model.position.set(x, groundY + BEE_SPAWN_ALTITUDE, z);
-                        validPosition = true;
-                    }
-                }
-            }
-
-            if (!validPosition) {
-                model.position.set(0, BEE_SPAWN_ALTITUDE, 0); // Fallback
+            const resBee = findValidGroundPosition({
+                areaSize,
+                spawnAttempts,
+                minDistanceFromPlayer: MIN_DISTANCE_FROM_PLAYER,
+                playerStartPos,
+                raycastStartY: 50,
+                allowWater: true,
+                clearanceHeight: 3.0,
+                clearanceOriginOffset: 0.1,
+                maxGroundY: 15,
+                requireSlopeCheck: false, // bees don't require flat ground
+                requireClearance: true
+            });
+            if (resBee) {
+                model.position.set(resBee.position.x, resBee.groundY + BEE_SPAWN_ALTITUDE, resBee.position.z);
+            } else {
+                model.position.set(0, BEE_SPAWN_ALTITUDE, 0);
             }
 
             model.traverse((child) => {
@@ -1568,71 +1551,25 @@ async function spawnCrystals(numbersToSpawn: number[]) {
             // Random rotation for variety
             model.rotation.y = Math.random() * Math.PI * 2;
 
-            // Try to find a valid position on the ground
-            let validPosition = false;
-            let attempts = 0;
-
-            while (!validPosition && attempts < spawnAttempts) {
-                attempts++;
-
-                const x = (Math.random() - 0.5) * areaSize;
-                const z = (Math.random() - 0.5) * areaSize;
-                const y = 50; // Start high for raycasting
-
-                // Check distance from player starting position
-                const spawnPos = new THREE.Vector3(x, 0, z);
-                const distanceFromPlayer = spawnPos.distanceTo(playerStartPos);
-
-                if (distanceFromPlayer < MIN_DISTANCE_FROM_PLAYER) {
-                    continue; // Too close to player, try again
-                }
-
-                const origin = new THREE.Vector3(x, y, z);
-                raycaster.set(origin, down);
-                const intersects = raycaster.intersectObjects(worldObjects, true);
-
-                if (intersects.length > 0) {
-                    const groundY = intersects[0].point.y;
-                    const hitPoint = intersects[0].point;
-                    const hitObject = intersects[0].object as THREE.Mesh;
-
-                    // Check if it's water - both by material color and height
-                    const isWater = isWaterSurface(hitObject) || groundY < 0.5;
-
-                    // Check for clearance above (not under trees or other objects)
-                    const clearanceHeight = 4.0;
-                    const clearanceOrigin = hitPoint.clone();
-                    clearanceOrigin.y += 0.1;
-                    const upRay = new THREE.Vector3(0, 1, 0);
-                    raycaster.set(clearanceOrigin, upRay);
-                    raycaster.far = clearanceHeight;
-                    const clearanceIntersects = raycaster.intersectObjects(worldObjects, true);
-                    raycaster.far = Infinity;
-
-                    const hasClearance = clearanceIntersects.length === 0;
-
-                    // Check slope - crystals should be on relatively flat ground
-                    const normal = intersects[0].face?.normal;
-                    let slopeDot = 1;
-                    if (normal) {
-                        const worldNormal = normal.clone().applyMatrix3(
-                            new THREE.Matrix3().getNormalMatrix(hitObject.matrixWorld)
-                        ).normalize();
-                        slopeDot = worldNormal.dot(new THREE.Vector3(0, 1, 0));
-                    }
-                    const minSlopeDot = 0.85; // Roughly 30 degrees max slope
-
-                    // Accept position if: not water, not too steep, has clearance, height is accessible
-                    if (!isWater && slopeDot >= minSlopeDot && hasClearance && groundY < 8) {
-                        model.position.set(x, groundY, z);
-                        validPosition = true;
-                    }
-                }
-            }
-
-            if (!validPosition) {
-                // Fallback: place near origin if no valid position found
-                console.warn(`Could not find valid position for crystal ${i + 1}, placing at origin`);
+            const res = findValidGroundPosition({
+                areaSize,
+                spawnAttempts,
+                minDistanceFromPlayer: MIN_DISTANCE_FROM_PLAYER,
+                playerStartPos,
+                raycastStartY: 50,
+                allowWater: false,
+                considerWaterHeight: true,
+                waterHeightThreshold: 0.5,
+                clearanceHeight: 4.0,
+                clearanceOriginOffset: 0.1,
+                maxGroundY: 8,
+                minSlopeDot: 0.85,
+                requireSlopeCheck: true,
+                requireClearance: true
+            });
+            if (res) {
+                model.position.copy(res.position);
+            } else {
                 model.position.set(0, 0, 0);
             }
 
@@ -2443,7 +2380,7 @@ function forceBeeWander(bee: BeeInstance) {
 
         // Find ground height at new (x, z)
         let groundY = 0;
-        const groundResult = getGroundHeight(new THREE.Vector3(x, 50, z));
+        const groundResult = getGroundHeight(new THREE.Vector3(x, 0, z));
         if (groundResult) {
             groundY = groundResult.groundY;
         }
@@ -3136,7 +3073,7 @@ function showWinScreen() {
     document.head.appendChild(style);
 
     spawn2DFirework();
-    for (let i=0; i<10; i++) {
+    for (let i = 0; i < 10; i++) {
         setInterval(spawn2DFirework, 500 + Math.random() * 1000);
     }
 }
