@@ -164,6 +164,14 @@ let playerHeight = 1;
 const COLLISION_RADIUS = 0.8;
 const keys: { [key: string]: boolean } = {};
 let controlsLocked: boolean = false;
+let lastKeyEventTime = performance.now();
+const KEY_STUCK_TIMEOUT_MS = 1000;
+
+function clearAllKeys() {
+    for (const k in keys) {
+        if (Object.prototype.hasOwnProperty.call(keys, k)) keys[k] = false;
+    }
+}
 
 const tempBumpVector = new THREE.Vector3();
 
@@ -3281,6 +3289,8 @@ function updateCameraPosition(instant: boolean = false) {
 }
 
 window.addEventListener("keydown", (event) => {
+    lastKeyEventTime = performance.now();
+
     // Stop all input if the game is won
     if (collectedCrystals === TOTAL_EQUATIONS_TO_SOLVE) {
         keys[event.key] = false;
@@ -3310,8 +3320,28 @@ window.addEventListener("keydown", (event) => {
     keys[event.key] = true;
 });
 
-window.addEventListener("keyup", (event) => {
+window.addEventListener("keyup", (event: KeyboardEvent) => {
+    lastKeyEventTime = performance.now();
     keys[event.key] = false;
+});
+
+window.addEventListener("blur", () => {
+    lastKeyEventTime = performance.now();
+    clearAllKeys();
+});
+
+document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+        lastKeyEventTime = performance.now();
+        clearAllKeys();
+    }
+});
+
+document.addEventListener("pointerlockchange", () => {
+    if (document.pointerLockElement === null) {
+        lastKeyEventTime = performance.now();
+        clearAllKeys();
+    }
 });
 
 function setupFpsCounter() {
@@ -3491,6 +3521,21 @@ createSun().then(() => {
     return generateNewEquationAndRespawnCrystals();
 });
 
+function _checkAndClearStuckKeys() {
+    const anyKeyTrue = Object.keys(keys).some(k => keys[k]);
+    // If no key is set as pressed, ensure map is fully cleared (defensive)
+    if (!anyKeyTrue) {
+        clearAllKeys();
+        return;
+    }
+    // If some keys appear pressed but we haven't received key events for a while,
+    // assume they are stuck and clear them.
+    if (performance.now() - lastKeyEventTime > KEY_STUCK_TIMEOUT_MS) {
+        console.warn("Clearing stuck keys due to no recent key events.");
+        clearAllKeys();
+    }
+}
+
 function animate() {
     requestAnimationFrame(animate);
 
@@ -3594,6 +3639,8 @@ function animate() {
             }
             uiCrystalRenderer.render(uiCrystalScene, uiCrystalCamera);
         }
+
+        _checkAndClearStuckKeys();
     }
 }
 
