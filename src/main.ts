@@ -4,7 +4,7 @@ import {acceleratedRaycast, MeshBVH} from "three-mesh-bvh";
 
 import runningSoundUrl from "/src/sfx/running-in-grass-6237.mp3";
 import waterSoundUrl from "/src/sfx/walking-in-water-199418.mp3";
-import bumpSoundUrl from "/src/sfx/boing2-418548.mp3";
+import jumpSoundUrl from "/src/sfx/boing2-418548.mp3";
 import forestAtmosphereUrl from "/src/sfx/forest-atmosphere-001localization-poland-329745.mp3";
 import animalHitSoundUrl from "/src/sfx/zombie-bite-96528.mp3";
 import errorSoundUrl from "/src/sfx/wrong-answer-21-199825.mp3";
@@ -137,12 +137,11 @@ let jumpVelocity = 0;
 let jumpAnimationPlayed = false;
 let wasJumping = false;
 let jumpsRemaining = MAX_JUMPS;
-let bumpSoundPlayed = false;
 
 // Audio References
 let runningSound: THREE.PositionalAudio | null = null;
 let waterSound: THREE.PositionalAudio | null = null;
-let bumpSound: THREE.PositionalAudio | null = null;
+let jumpSound: THREE.PositionalAudio | null = null;
 let biteSound: THREE.PositionalAudio | null = null;
 let errorSound: THREE.PositionalAudio | null = null;
 let waterSplashSound: THREE.PositionalAudio | null = null;
@@ -870,7 +869,7 @@ async function loadAudio() {
     if (!playerModel) return;
     try {
         runningSound = await createAudioFromUrl(runningSoundUrl, true, listener, {
-            loop: true, volume: 1.5, refDistance: 10
+            loop: true, volume: 2, refDistance: 10
         }) as THREE.PositionalAudio;
         playerModel.add(runningSound);
 
@@ -879,10 +878,10 @@ async function loadAudio() {
         }) as THREE.PositionalAudio;
         playerModel.add(waterSound);
 
-        bumpSound = await createAudioFromUrl(bumpSoundUrl, true, listener, {
+        jumpSound = await createAudioFromUrl(jumpSoundUrl, true, listener, {
             loop: false, volume: 0.25, refDistance: 10
         }) as THREE.PositionalAudio;
-        playerModel.add(bumpSound);
+        playerModel.add(jumpSound);
 
         biteSound = await createAudioFromUrl(animalHitSoundUrl, true, listener, {
             loop: false, volume: 1, refDistance: 10
@@ -890,7 +889,7 @@ async function loadAudio() {
         playerModel.add(biteSound);
 
         errorSound = await createAudioFromUrl(errorSoundUrl, true, listener, {
-            loop: false, volume: 1, refDistance: 10
+            loop: false, volume: 0.5, refDistance: 10
         }) as THREE.PositionalAudio;
         playerModel.add(errorSound);
 
@@ -2015,13 +2014,8 @@ function handlePlayerMovement() {
                 if (collidedSpider) triggerSpiderAttack(collidedSpider);
                 if (biteSound && !biteSound.isPlaying) biteSound.play();
             } else if (hitWall) {
-                if (bumpSound && !bumpSoundPlayed) {
-                    bumpSound.play();
-                    bumpSoundPlayed = true;
-                }
+                // no sound
             }
-        } else {
-            bumpSoundPlayed = false;
         }
     }
 
@@ -2076,6 +2070,8 @@ function handlePlayerMovement() {
         }
     }
 
+    const runningSoundPlaybackRate = 0.75;
+
     if (runAction && walkAction) {
         if (!controlsLocked) {
             if (isJumping) {
@@ -2100,11 +2096,11 @@ function handlePlayerMovement() {
                     if (keys["Shift"]) {
                         moveSpeed = RUN_SPEED * 2;
                         runAction.timeScale = 2.0;
-                        if (runningSound) runningSound.setPlaybackRate(2.0);
+                        if (runningSound) runningSound.setPlaybackRate(runningSoundPlaybackRate*2);
                     } else {
                         moveSpeed = RUN_SPEED;
                         runAction.timeScale = 1.0;
-                        if (runningSound) runningSound.setPlaybackRate(1.0);
+                        if (runningSound) runningSound.setPlaybackRate(runningSoundPlaybackRate);
                     }
                     if (!runAction.isRunning()) {
                         walkAction.fadeOut(0.2);
@@ -2121,7 +2117,7 @@ function handlePlayerMovement() {
                 if (walkAction.isRunning()) walkAction.stop();
                 if (runningSound && runningSound.isPlaying) {
                     runningSound.stop();
-                    if (runningSound) runningSound.setPlaybackRate(1.0);
+                    if (runningSound) runningSound.setPlaybackRate(runningSoundPlaybackRate);
                 }
                 if (waterSound && waterSound.isPlaying) waterSound.stop();
             }
@@ -2361,6 +2357,10 @@ window.addEventListener("keydown", (event) => {
         isJumping = true;
         jumpVelocity = JUMP_FORCE;
         jumpsRemaining--;
+        if (jumpSound) {
+            jumpSound.stop();
+            jumpSound.play();
+        }
     }
     keys[key] = true;
 });
