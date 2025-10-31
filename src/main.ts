@@ -36,7 +36,6 @@ const COLLISION_RADIUS = 0.8;
 const JUMP_FORCE = 10;
 const JUMP_GRAVITY = -30;
 const MAX_JUMPS = 2;
-const KEY_STUCK_TIMEOUT_MS = 1000;
 
 // Spiders
 const SPIDER_DETECTION_RANGE = 10;
@@ -112,7 +111,6 @@ document.body.appendChild(renderer.domElement);
 // Input
 const keys: { [key: string]: boolean } = {};
 let controlsLocked: boolean = false;
-let lastKeyEventTime = performance.now();
 
 // Entity Arrays
 const worldObjects: THREE.Mesh[] = [];
@@ -501,18 +499,6 @@ async function loadModel(
 
 function isMesh(child: THREE.Object3D): child is THREE.Mesh {
     return (child as THREE.Mesh).isMesh && 'geometry' in child;
-}
-
-function _checkAndClearStuckKeys() {
-    const anyKeyTrue = Object.keys(keys).some(k => keys[k]);
-    if (!anyKeyTrue) {
-        clearAllKeys();
-        return;
-    }
-    if (performance.now() - lastKeyEventTime > KEY_STUCK_TIMEOUT_MS) {
-        console.warn("Clearing stuck keys due to no recent key events.");
-        clearAllKeys();
-    }
 }
 
 // --- LOADING & UI FUNCTIONS ---
@@ -2247,12 +2233,17 @@ function showWinScreen() {
 // --- EVENT LISTENERS ---
 
 window.addEventListener("keydown", (event) => {
-    lastKeyEventTime = performance.now();
+    if (event.key === "Escape") {
+        clearAllKeys();
+        event.preventDefault();
+        return;
+    }
     if (collectedCrystals === TOTAL_EQUATIONS_TO_SOLVE) {
         keys[event.key] = false;
         return;
     }
     if (controlsLocked && (event.key === "w" || event.key === "W" || event.key === "ArrowUp" || event.key === "s" || event.key === "S" || event.key === "ArrowDown")) {
+        clearAllKeys();
         return;
     }
     if ((event.key === " " || event.key === "Spacebar") && jumpsRemaining > 0 && !controlsLocked) {
@@ -2264,25 +2255,21 @@ window.addEventListener("keydown", (event) => {
 });
 
 window.addEventListener("keyup", (event: KeyboardEvent) => {
-    lastKeyEventTime = performance.now();
     keys[event.key] = false;
 });
 
 window.addEventListener("blur", () => {
-    lastKeyEventTime = performance.now();
     clearAllKeys();
 });
 
 document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
-        lastKeyEventTime = performance.now();
         clearAllKeys();
     }
 });
 
 document.addEventListener("pointerlockchange", () => {
     if (document.pointerLockElement === null) {
-        lastKeyEventTime = performance.now();
         clearAllKeys();
     }
 });
@@ -2362,8 +2349,6 @@ function animate() {
             for (const model of uiCrystalModels) model.rotation.y += 0.01;
             uiCrystalRenderer.render(uiCrystalScene, uiCrystalCamera);
         }
-
-        _checkAndClearStuckKeys();
     }
 }
 
