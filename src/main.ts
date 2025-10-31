@@ -2233,26 +2233,49 @@ function showWinScreen() {
 // --- EVENT LISTENERS ---
 
 window.addEventListener("keydown", (event) => {
+    const key = event.key;
+
+    const leftKeys = new Set(['a', 'A', 'ArrowLeft']);
+    const rightKeys = new Set(['d', 'D', 'ArrowRight']);
+    const upKeys = new Set(['w', 'W', 'ArrowUp']);
+    const downKeys = new Set(['s', 'S', 'ArrowDown']);
+
+    const rightPressed = [...rightKeys].some(k => Boolean(keys[k]));
+    const leftPressed = [...leftKeys].some(k => Boolean(keys[k]));
+    const upPressed = [...upKeys].some(k => Boolean(keys[k]));
+    const downPressed = [...downKeys].some(k => Boolean(keys[k]));
+
+    if ((leftKeys.has(key) && rightPressed) ||
+        (rightKeys.has(key) && leftPressed) ||
+        (upKeys.has(key) && downPressed) ||
+        (downKeys.has(key) && upPressed)) {
+        clearAllKeys();
+        keys[key] = true;
+        event.preventDefault();
+        return;
+    }
+
     if (event.key === "Escape") {
         clearAllKeys();
         event.preventDefault();
         return;
     }
     if (collectedCrystals === TOTAL_EQUATIONS_TO_SOLVE) {
-        keys[event.key] = false;
+        keys[key] = false;
         return;
     }
-    if (controlsLocked && (event.key === "w" || event.key === "W" || event.key === "ArrowUp" || event.key === "s" || event.key === "S" || event.key === "ArrowDown")) {
+    if (controlsLocked && (key === "w" || key === "W" || key === "ArrowUp" || key === "s" || key === "S" || key === "ArrowDown")) {
         clearAllKeys();
         return;
     }
-    if ((event.key === " " || event.key === "Spacebar") && jumpsRemaining > 0 && !controlsLocked) {
+    if ((key === " " || key === "Spacebar") && jumpsRemaining > 0 && !controlsLocked) {
         isJumping = true;
         jumpVelocity = JUMP_FORCE;
         jumpsRemaining--;
     }
-    keys[event.key] = true;
+    keys[key] = true;
 });
+
 
 window.addEventListener("keyup", (event: KeyboardEvent) => {
     keys[event.key] = false;
