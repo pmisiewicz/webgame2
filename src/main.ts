@@ -1334,7 +1334,7 @@ async function generateNewEquationAndRespawnCrystals() {
     const randInt = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min;
 
     let A = 0, B = 0, unknown = 0, equationText = '';
-    const MIN_VAL = 1, MAX_SUM = 10;
+    const MIN_VAL = 1, MAX_SUM = 20;
 
     if (chosen === 'ADD') {
         const S = randInt(2, MAX_SUM);
