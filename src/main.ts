@@ -106,6 +106,7 @@ const loader = new GLTFLoader();
 
 const renderer = new THREE.WebGLRenderer({antialias: true});
 renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
 document.body.appendChild(renderer.domElement);
@@ -150,6 +151,7 @@ let backgroundMusic: THREE.Audio | THREE.PositionalAudio;
 let successSound: THREE.Audio | THREE.PositionalAudio;
 let fireworkBuffer: AudioBuffer | null = null;
 let wormBuffer: AudioBuffer | null = null;
+let lastRunningAudioPlaybackRate = 0.75;
 
 // Game Logic
 let collectedCrystals = 0;
@@ -166,6 +168,8 @@ let fpsElement: HTMLElement | null = null;
 let frameCount = 0;
 let lastTime = performance.now();
 const fpsInterval = 1000;
+let minimapRenderFrame = 0;
+const MINIMAP_RENDER_INTERVAL = 2; // Render minimap every 2 frames
 
 // Loading
 let totalLoadingSteps = 0;
@@ -242,13 +246,21 @@ interface SplashParticle {
 
 const particleData: SplashParticle[] = [];
 const particleGeometry = new THREE.SphereGeometry(0.05, 4, 4);
-const particleMaterial = new THREE.MeshBasicMaterial({
-    color: SPLASH_COLOR,
-    transparent: true,
-    opacity: 1,
-    depthWrite: false
-});
+const particleMaterialCache: Map<number, THREE.MeshBasicMaterial> = new Map();
 let lastSplashTime = 0;
+
+// Create or reuse material for particle color
+function getParticleMaterial(color: number): THREE.MeshBasicMaterial {
+    if (!particleMaterialCache.has(color)) {
+        particleMaterialCache.set(color, new THREE.MeshBasicMaterial({
+            color: color,
+            transparent: true,
+            opacity: 1,
+            depthWrite: false
+        }));
+    }
+    return particleMaterialCache.get(color)!;
+}
 
 // --- MINIMAP SETUP ---
 
@@ -675,7 +687,7 @@ function spawnParticle(
 
 function spawnSplash(position: THREE.Vector3) {
     for (let i = 0; i < SPLASH_PARTICLE_COUNT; i++) {
-        const material = particleMaterial.clone() as THREE.MeshBasicMaterial;
+        const material = getParticleMaterial(SPLASH_COLOR);
         const initialPosition = position.clone();
         initialPosition.y += 0.2;
         initialPosition.x += (Math.random() - 0.5) * 0.5;
@@ -692,7 +704,7 @@ function spawnSplash(position: THREE.Vector3) {
 
 function spawnBigSplash(position: THREE.Vector3) {
     for (let i = 0; i < BIG_SPLASH_PARTICLE_COUNT; i++) {
-        const material = particleMaterial.clone() as THREE.MeshBasicMaterial;
+        const material = getParticleMaterial(SPLASH_COLOR);
         const initialPosition = position.clone();
         initialPosition.y += 0.3;
         initialPosition.x += (Math.random() - 0.5) * BIG_SPLASH_SPREAD;
@@ -712,8 +724,8 @@ function spawnBigSplash(position: THREE.Vector3) {
 
 function spawnCrystalCollectEffect(position: THREE.Vector3, color: THREE.Color, success: boolean) {
     for (let i = 0; i < CRYSTAL_PARTICLE_COUNT; i++) {
-        const material = particleMaterial.clone() as THREE.MeshBasicMaterial;
-        material.color.set(color);
+        const colorHex = color.getHex();
+        const material = getParticleMaterial(colorHex);
         material.opacity = 1;
 
         const initialPosition = position.clone();
@@ -740,9 +752,6 @@ function updateSplashes(delta: number) {
 
         if (particle.age > particle.maxAge) {
             scene.remove(particle.mesh);
-            if (particle.mesh.material instanceof THREE.Material) {
-                particle.mesh.material.dispose();
-            }
             particleData.splice(i, 1);
             continue;
         }
@@ -751,7 +760,8 @@ function updateSplashes(delta: number) {
         particle.mesh.position.addScaledVector(particle.velocity, delta);
 
         const lifeRatio = 1 - (particle.age / particle.maxAge);
-        (particle.mesh.material as THREE.MeshBasicMaterial).opacity = lifeRatio;
+        const material = particle.mesh.material as THREE.MeshBasicMaterial;
+        material.opacity = lifeRatio;
         const scale = lifeRatio * 0.9 + 0.3;
         particle.mesh.scale.setScalar(scale);
     }
@@ -2126,11 +2136,18 @@ function handlePlayerMovement() {
                     if (keys["Shift"]) {
                         moveSpeed = RUN_SPEED * 2;
                         runAction.timeScale = 2.0;
-                        if (runningSound) runningSound.setPlaybackRate(runningSoundPlaybackRate*2);
+                        const newPlaybackRate = runningSoundPlaybackRate * 2;
+                        if (runningSound && lastRunningAudioPlaybackRate !== newPlaybackRate) {
+                            runningSound.setPlaybackRate(newPlaybackRate);
+                            lastRunningAudioPlaybackRate = newPlaybackRate;
+                        }
                     } else {
                         moveSpeed = RUN_SPEED;
                         runAction.timeScale = 1.0;
-                        if (runningSound) runningSound.setPlaybackRate(runningSoundPlaybackRate);
+                        if (runningSound && lastRunningAudioPlaybackRate !== runningSoundPlaybackRate) {
+                            runningSound.setPlaybackRate(runningSoundPlaybackRate);
+                            lastRunningAudioPlaybackRate = runningSoundPlaybackRate;
+                        }
                     }
                     if (!runAction.isRunning()) {
                         walkAction.fadeOut(0.2);
@@ -2147,7 +2164,10 @@ function handlePlayerMovement() {
                 if (walkAction.isRunning()) walkAction.stop();
                 if (runningSound && runningSound.isPlaying) {
                     runningSound.stop();
-                    if (runningSound) runningSound.setPlaybackRate(runningSoundPlaybackRate);
+                    if (lastRunningAudioPlaybackRate !== runningSoundPlaybackRate) {
+                        runningSound.setPlaybackRate(runningSoundPlaybackRate);
+                        lastRunningAudioPlaybackRate = runningSoundPlaybackRate;
+                    }
                 }
                 if (waterSound && waterSound.isPlaying) waterSound.stop();
             }
@@ -2419,7 +2439,7 @@ document.addEventListener("pointerlockchange", () => {
 window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
@@ -2485,7 +2505,10 @@ function animate() {
         }
 
         // Render
-        updateAndRenderMinimap();
+        minimapRenderFrame++;
+        if (minimapRenderFrame % MINIMAP_RENDER_INTERVAL === 0) {
+            updateAndRenderMinimap();
+        }
         renderer.render(scene, camera);
         if (uiCrystalRenderer && uiCrystalScene && uiCrystalCamera) {
             for (const model of uiCrystalModels) model.rotation.y += 0.01;
