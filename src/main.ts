@@ -13,6 +13,7 @@ import successSoundUrl from "/src/sfx/success-340660.mp3";
 import beeFlyingSoundUrl from "/src/sfx/bee-flying-loop-42287.mp3";
 import fireworkSoundUrl from "/src/sfx/firework.mp3";
 import wormMovementSoundUrl from "/src/sfx/worm-movement-277577.mp3";
+import explosionSoundUrl from "/src/sfx/explosion.mp3";
 
 // --- CONSTANTS ---
 
@@ -59,6 +60,9 @@ const BEE_WANDER_RANGE = 20.0;
 const BEE_ATTACK_TRIGGER_DISTANCE = 2.0;
 const BEE_ATTACK_DASH_DURATION = 0.3;
 const BEE_ATTACK_COOLDOWN = 1.5;
+
+// Ladybirds
+const LADYBIRD_COLLISION_RADIUS = 0.5;
 
 // Particles
 const SPLASH_PARTICLE_COUNT = 16;
@@ -121,6 +125,7 @@ let controlsLocked: boolean = false;
 const worldObjects: THREE.Mesh[] = [];
 const clouds: THREE.Group[] = [];
 const animals: THREE.Group[] = [];
+const ladybirds: THREE.Group[] = [];
 const crystals: THREE.Group[] = [];
 
 // Player
@@ -151,6 +156,7 @@ let backgroundMusic: THREE.Audio | THREE.PositionalAudio;
 let successSound: THREE.Audio | THREE.PositionalAudio;
 let fireworkBuffer: AudioBuffer | null = null;
 let wormBuffer: AudioBuffer | null = null;
+let explosionBuffer: AudioBuffer | null = null;
 let lastRunningAudioPlaybackRate = 0.75;
 
 // Game Logic
@@ -169,7 +175,7 @@ let frameCount = 0;
 let lastTime = performance.now();
 const fpsInterval = 1000;
 let minimapRenderFrame = 0;
-const MINIMAP_RENDER_INTERVAL = 2; // Render minimap every 2 frames
+const MINIMAP_RENDER_INTERVAL = 5;
 
 // Loading
 let totalLoadingSteps = 0;
@@ -236,6 +242,16 @@ interface BeeInstance {
 }
 
 const bees: BeeInstance[] = [];
+
+interface LadybirdInstance {
+    model: THREE.Group;
+    nextAnimationChangeTime: number;
+    moveDirection: THREE.Vector3;
+    moveSpeed: number;
+    changeDirectionTime: number;
+}
+
+const ladybirdInstances: LadybirdInstance[] = [];
 
 interface SplashParticle {
     mesh: THREE.Mesh;
@@ -928,6 +944,13 @@ async function loadAudio() {
             console.warn("Failed to load worm movement sound:", err);
             wormBuffer = null;
         }
+
+        try {
+            explosionBuffer = await audioLoader.loadAsync(explosionSoundUrl);
+        } catch (err) {
+            console.warn("Failed to load explosion sound:", err);
+            explosionBuffer = null;
+        }
     } catch (err) {
         console.error("One or more audio files failed to load:", err);
     }
@@ -1209,6 +1232,43 @@ async function spawnBees(count: number) {
             });
         } catch (err) {
             console.warn(`Failed to load bee model:`, err);
+        }
+    }
+}
+
+async function spawnLadybirds(count: number) {
+    const areaSize = 200;
+    const spawnAttempts = 15;
+    const MIN_DISTANCE_FROM_PLAYER = 20;
+
+    for (let i = 0; i < count; i++) {
+        try {
+            const {model} = await loadModel("Ladybird.glb");
+            incrementLoadingProgress(`Ładowanie Biedronek... (${i + 1}/${count})`);
+
+            const scaleFactor = 0.3 + Math.random() * 0.15;
+            model.scale.setScalar(scaleFactor);
+            model.rotation.y = Math.random() * Math.PI * 2;
+
+            const res = findValidGroundPosition({
+                areaSize, spawnAttempts, minDistanceFromPlayer: MIN_DISTANCE_FROM_PLAYER,
+                raycastStartY: 50, allowWater: false,
+                clearanceHeight: 3.0, clearanceOriginOffset: 0.1, maxGroundY: 15,
+                requireSlopeCheck: true, requireClearance: true
+            });
+            if (res) model.position.set(res.position.x, res.groundY, res.position.z);
+
+            scene.add(model);
+            ladybirds.push(model);
+            ladybirdInstances.push({
+                model: model,
+                nextAnimationChangeTime: clock.getElapsedTime() + 2 + Math.random() * 8,
+                moveDirection: new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize(),
+                moveSpeed: 0.015 + Math.random() * 0.025,
+                changeDirectionTime: clock.getElapsedTime() + 3 + Math.random() * 5
+            });
+        } catch (err) {
+            console.warn(`Failed to load ladybird model:`, err);
         }
     }
 }
@@ -1652,6 +1712,78 @@ function updateAnimalMovement(animalInstance: AnimalInstance) {
     }
 }
 
+function updateLadybirdMovement(ladybirdInstance: LadybirdInstance) {
+    const currentTime = clock.getElapsedTime();
+    const ladybird = ladybirdInstance.model;
+
+    // Change direction periodically
+    if (currentTime >= ladybirdInstance.changeDirectionTime) {
+        ladybirdInstance.moveDirection = new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize();
+        ladybirdInstance.changeDirectionTime = currentTime + 3 + Math.random() * 5;
+    }
+
+    const LADYBUG_HEIGHT = 0.8;
+    const OBSTACLE_CHECK_DISTANCE = 1.5;
+    const TURN_ANGLE = Math.PI / 6;
+
+    // Check for obstacles
+    const rayOrigin = ladybird.position.clone();
+    rayOrigin.y += LADYBUG_HEIGHT / 2;
+    raycaster.set(rayOrigin, ladybirdInstance.moveDirection);
+    raycaster.far = OBSTACLE_CHECK_DISTANCE;
+    const intersects = raycaster.intersectObjects(worldObjects, true);
+    raycaster.far = Infinity;
+
+    let hasObstacle = intersects.length > 0 && intersects[0].distance < OBSTACLE_CHECK_DISTANCE;
+
+    // Check collision with other ladybirds
+    if (!hasObstacle) {
+        const futurePosition = ladybird.position.clone().addScaledVector(ladybirdInstance.moveDirection, OBSTACLE_CHECK_DISTANCE);
+        for (const otherLadybird of ladybirds) {
+            if (otherLadybird !== ladybird && futurePosition.distanceTo(otherLadybird.position) < 1.0) {
+                hasObstacle = true;
+                break;
+            }
+        }
+        // Also check collision with animals
+        if (!hasObstacle) {
+            for (const animal of animals) {
+                if (futurePosition.distanceTo(animal.position) < 1.5) {
+                    hasObstacle = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (hasObstacle) {
+        ladybirdInstance.moveDirection.applyAxisAngle(new THREE.Vector3(0, 1, 0), TURN_ANGLE * (Math.random() < 0.5 ? 1 : -1));
+    } else {
+        const moveVector = ladybirdInstance.moveDirection.clone().multiplyScalar(ladybirdInstance.moveSpeed * 0.016 * 60);
+        const newPosition = ladybird.position.clone().add(moveVector);
+        const groundIntersect = getGroundIntersection(newPosition, 10);
+
+        if (groundIntersect) {
+            const groundY = groundIntersect.point.y;
+            const hitObject = groundIntersect.object as THREE.Mesh;
+            let isSafe = !isWaterSurface(hitObject);
+            if (groundIntersect.face) {
+                const worldNormal = groundIntersect.face.normal.clone().applyMatrix3(
+                    new THREE.Matrix3().getNormalMatrix(hitObject.matrixWorld)
+                ).normalize();
+                if (worldNormal.dot(new THREE.Vector3(0, 1, 0)) < 0.6) isSafe = false;
+            }
+            if (isSafe) {
+                ladybird.position.set(newPosition.x, groundY + 0.25, newPosition.z);
+                // Make ladybird face the direction it's moving
+                ladybird.lookAt(newPosition.clone().add(ladybirdInstance.moveDirection));
+            } else {
+                ladybirdInstance.moveDirection.applyAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 3);
+            }
+        }
+    }
+}
+
 function triggerSpiderAttack(spider: SpiderInstance) {
     if (spider.isAttacking || spider.isJumpingBack || !spider.attackAction || !spider.mixer) return;
 
@@ -2032,7 +2164,17 @@ function handlePlayerMovement() {
             }
         }
 
-        if (heightDifference > MAX_STEP_HEIGHT || hitWall || hitAnimal || hitSpider || hitBee) {
+        let hitLadybird = false;
+        let collidedLadybird: THREE.Group | null = null;
+        for (const ladybird of ladybirds) {
+            if (targetPosition.distanceTo(ladybird.position) < (COLLISION_RADIUS + LADYBIRD_COLLISION_RADIUS)) {
+                hitLadybird = true;
+                collidedLadybird = ladybird;
+                break;
+            }
+        }
+
+        if (heightDifference > MAX_STEP_HEIGHT || hitWall || hitAnimal || hitSpider || hitBee || hitLadybird) {
             targetPosition.x = originalPosition.x;
             targetPosition.z = originalPosition.z;
             moving = false;
@@ -2055,6 +2197,16 @@ function handlePlayerMovement() {
                 if (biteSound && !biteSound.isPlaying) biteSound.play();
             } else if (hitWall) {
                 // no sound
+            }
+            if (hitLadybird && collidedLadybird) {
+                spawnExplosionEffect(collidedLadybird.position);
+                // Remove ladybird from scene and arrays
+                scene.remove(collidedLadybird);
+                const index = ladybirds.indexOf(collidedLadybird);
+                if (index > -1) {
+                    ladybirds.splice(index, 1);
+                    ladybirdInstances.splice(index, 1);
+                }
             }
         }
     }
@@ -2488,6 +2640,11 @@ function animate() {
             updateBeeAI(bee);
         }
 
+        // Update Ladybirds
+        for (const ladybirdInstance of ladybirdInstances) {
+            updateLadybirdMovement(ladybirdInstance);
+        }
+
         // Update Player & Game Logic
         handlePlayerMovement();
         if (!controlsLocked) checkCrystalCollection();
@@ -2524,12 +2681,13 @@ setupLoadingBar();
 setupCrystalUI();
 setupEquationUI();
 
-const animalCount = 10;
+const animalCount = 5;
 const spiderCount = 3;
 const beeCount = 3;
+const ladybirdCount = 5;
 
-// Initialize loading with total steps: sun (1) + clouds (1) + player (2 steps) + world (2 steps) + animals + spiders + bees + crystals + UI
-initializeLoading(1 + 1 + 2 + 2 + animalCount + spiderCount + beeCount + TOTAL_CRYSTALS + 1);
+// Initialize loading with total steps: sun (1) + clouds (1) + player (2 steps) + world (2 steps) + animals + spiders + bees + ladybirds + crystals + UI
+initializeLoading(1 + 1 + 2 + 2 + animalCount + spiderCount + beeCount + ladybirdCount + TOTAL_CRYSTALS + 1);
 
 createWorld()
     .then(() => createPlayer())
@@ -2538,7 +2696,46 @@ createWorld()
     .then(() => spawnAnimals(animalCount))
     .then(() => spawnSpiders(spiderCount))
     .then(() => spawnBees(beeCount))
+    .then(() => spawnLadybirds(ladybirdCount))
     .then(() => loadUICrystalTemplate())
     .then(() => generateNewEquationAndRespawnCrystals());
 
 animate();
+
+function spawnExplosionEffect(position: THREE.Vector3) {
+    // Play explosion sound
+    if (explosionBuffer && listener) {
+        const sound = new THREE.Audio(listener);
+        sound.setBuffer(explosionBuffer);
+        sound.setVolume(0.8);
+        sound.play();
+    }
+
+    // Spawn explosion particles
+    const explosionParticleCount = 200;
+    const explosionVelocityMultiplier = 4.0;
+    const explosionColors = [0xff4500, 0xffa500, 0xffff00, 0xffffff]; // Orange, yellow, white
+
+    for (let i = 0; i < explosionParticleCount; i++) {
+        const color = explosionColors[Math.floor(Math.random() * explosionColors.length)];
+        const material = getParticleMaterial(color);
+        material.opacity = 1;
+
+        const initialPosition = position.clone();
+        initialPosition.y += 0.5;
+        initialPosition.x += (Math.random() - 0.5) * 0.5;
+        initialPosition.z += (Math.random() - 0.5) * 0.5;
+
+        const angle = Math.random() * Math.PI * 2;
+        const speed = Math.random() * 2.0 + 1.0;
+        const velX = Math.cos(angle) * speed * explosionVelocityMultiplier;
+        const velY = Math.random() * 3.0 + 1.0;
+        const velZ = Math.sin(angle) * speed * explosionVelocityMultiplier;
+        const velocity = new THREE.Vector3(velX, velY, velZ);
+
+        const scale = Math.random() * 0.5 + 0.5;
+        const maxAge = 1.5 + Math.random() * 0.5;
+
+        spawnParticle(initialPosition, velocity, material, maxAge, scale);
+    }
+}
